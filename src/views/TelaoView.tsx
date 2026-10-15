@@ -5,6 +5,8 @@ import {
   subscribeToPlayers,
   subscribeToAnswers,
   updateSessionState,
+  joinSessionAsPlayer,
+  submitAnswer,
 } from '../services/quizService';
 import { LiveCharts } from '../components/LiveCharts';
 import { DataCloud } from '../components/DataCloud';
@@ -21,6 +23,8 @@ import {
   VolumeX,
   Maximize2,
   CheckCircle2,
+  UserPlus,
+  Bot,
 } from 'lucide-react';
 
 interface TelaoViewProps {
@@ -159,6 +163,48 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
     });
   };
 
+  // Simular entrada de alunos para teste
+  const handleAddTestStudents = async () => {
+    const testNames = ['Lucas Silva', 'Mariana Costa', 'Pedro Henrique', 'Camila Santos'];
+    for (const name of testNames) {
+      if (!players.some((p) => p.nickname === name)) {
+        await joinSessionAsPlayer(sessionId, name);
+      }
+    }
+  };
+
+  // Simular respostas dos alunos na pergunta ativa
+  const handleSimulateAnswers = async () => {
+    if (!currentQuestion || !session || session.status !== 'question') return;
+    for (const p of players) {
+      // Don't resubmit if already answered
+      if (answers.some((a) => a.playerId === p.id)) continue;
+
+      const isCorrect = Math.random() > 0.25;
+      const answerVal = isCorrect
+        ? currentQuestion.correctAnswer
+        : currentQuestion.options.find((o) => o !== currentQuestion.correctAnswer) || currentQuestion.options[0];
+      const timeSpent = Math.floor(1500 + Math.random() * 5000);
+      const points = isCorrect ? Math.round(1000 * 0.85) : 0;
+
+      await submitAnswer(
+        sessionId,
+        {
+          sessionId,
+          questionIndex: currentQuestionIndex,
+          playerId: p.id,
+          playerNickname: p.nickname,
+          answer: answerVal,
+          isCorrect,
+          pointsAwarded: points,
+          timeSpentMs: timeSpent,
+        },
+        p.score,
+        p.streak
+      );
+    }
+  };
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
@@ -243,8 +289,18 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
           </div>
 
           {players.length === 0 ? (
-            <div className="py-8 text-center text-slate-400 text-sm italic">
-              Aguardando os alunos entrarem na sala com o PIN...
+            <div className="py-8 text-center space-y-3">
+              <p className="text-slate-400 text-sm italic">
+                Aguardando os alunos entrarem na sala com o PIN...
+              </p>
+              <button
+                type="button"
+                onClick={handleAddTestStudents}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 text-xs font-semibold inline-flex items-center gap-2 transition-colors shadow-sm"
+              >
+                <UserPlus className="w-4 h-4 text-indigo-400" />
+                <span>+ Adicionar Alunos Virtuais para Teste Rápido</span>
+              </button>
             </div>
           ) : (
             <div className="flex flex-wrap gap-2.5 max-h-48 overflow-y-auto pr-2">
@@ -261,21 +317,39 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
           )}
         </div>
 
-        {/* Big Launch Button */}
-        <div className="text-center pt-2">
-          <button
-            onClick={handleStartQuiz}
-            disabled={players.length === 0}
-            className="px-8 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-lg font-black shadow-xl hover:shadow-indigo-500/25 transition-all flex items-center gap-3 mx-auto"
-          >
-            <Play className="w-6 h-6 fill-current" />
-            <span>Iniciar o Quiz ({totalQuestions} Perguntas)</span>
-          </button>
-          {players.length === 0 && (
-            <span className="text-xs text-slate-500 mt-2 block">
-              Dica: Você pode abrir a aba "Entrar como Aluno" para testar antes de iniciar!
-            </span>
-          )}
+        {/* Big Launch Button & Quick Test */}
+        <div className="text-center pt-2 space-y-3">
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={handleStartQuiz}
+              disabled={players.length === 0}
+              className="px-8 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-lg font-black shadow-xl hover:shadow-indigo-500/25 transition-all flex items-center gap-3"
+            >
+              <Play className="w-6 h-6 fill-current" />
+              <span>Iniciar o Quiz ({totalQuestions} Perguntas)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleAddTestStudents}
+              className="px-4 py-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition-colors"
+              title="Adicionar alunos virtuais para demonstrar o telão"
+            >
+              <UserPlus className="w-4 h-4 text-indigo-400" />
+              <span>+ Alunos p/ Teste</span>
+            </button>
+          </div>
+
+          <div className="text-xs text-slate-400 flex items-center justify-center gap-2">
+            <span>Dica: Você também pode clicar em</span>
+            <button
+              onClick={onNavigateToStudent}
+              className="text-indigo-400 font-bold underline hover:text-indigo-300"
+            >
+              Entrar como Aluno
+            </button>
+            <span>no topo para responder você mesmo!</span>
+          </div>
         </div>
       </div>
     );
@@ -308,6 +382,18 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
               </span>
               <span className="text-slate-400">responderam</span>
             </div>
+
+            {players.length > 0 && answeredCount < players.length && (
+              <button
+                type="button"
+                onClick={handleSimulateAnswers}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600/90 hover:bg-indigo-600 text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow"
+                title="Simular respostas automáticas para demonstração"
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span>Simular Votos</span>
+              </button>
+            )}
 
             <button
               onClick={handleCloseQuestion}
