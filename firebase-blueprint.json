@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "users": {
+      "title": "User",
+      "description": "Teacher profile authenticated via Google Auth",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "quizzes": {
+      "title": "Quiz",
+      "description": "A quiz collection created by a teacher containing multiple-choice or true/false questions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 500 },
+        "subject": { "type": "string", "maxLength": 50 },
+        "isPublic": { "type": "boolean" },
+        "questions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "title", "questions"]
+    },
+    "sessions": {
+      "title": "Session",
+      "description": "A live game room session hosted by a teacher for students to join via PIN",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "pin": { "type": "string", "minLength": 6, "maxLength": 6 },
+        "hostId": { "type": "string" },
+        "quizId": { "type": "string" },
+        "quizTitle": { "type": "string", "maxLength": 150 },
+        "status": {
+          "type": "string",
+          "enum": ["lobby", "question", "result", "leaderboard", "podium", "finished"]
+        },
+        "currentQuestionIndex": { "type": "integer" },
+        "totalQuestions": { "type": "integer" },
+        "isAcceptingAnswers": { "type": "boolean" },
+        "questionStartedAt": { "type": "integer" },
+        "timeLimitSeconds": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pin", "hostId", "status", "currentQuestionIndex"]
+    },
+    "players": {
+      "title": "Player",
+      "description": "A student participating in a specific live session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "nickname": { "type": "string", "maxLength": 40 },
+        "score": { "type": "integer" },
+        "streak": { "type": "integer" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "nickname"]
+    },
+    "answers": {
+      "title": "Answer",
+      "description": "A student answer submission for a question in a live session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "questionIndex": { "type": "integer" },
+        "playerId": { "type": "string" },
+        "playerNickname": { "type": "string", "maxLength": 40 },
+        "answer": { "type": "string", "maxLength": 200 },
+        "isCorrect": { "type": "boolean" },
+        "pointsAwarded": { "type": "integer" },
+        "timeSpentMs": { "type": "integer" },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "questionIndex", "playerId", "answer"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/users" },
+      "description": "Teacher profile document"
+    },
+    "/quizzes/{quizId}": {
+      "schema": { "$ref": "#/entities/quizzes" },
+      "description": "Saved quizzes created by teachers"
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/sessions" },
+      "description": "Live quiz sessions controlled by teachers"
+    },
+    "/sessions/{sessionId}/players/{playerId}": {
+      "schema": { "$ref": "#/entities/players" },
+      "description": "Students registered in a live session"
+    },
+    "/sessions/{sessionId}/answers/{answerId}": {
+      "schema": { "$ref": "#/entities/answers" },
+      "description": "Individual answers submitted by students in a session"
+    }
+  }
+}

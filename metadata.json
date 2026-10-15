@@ -1,0 +1,6 @@
+{
+  "name": "QuizClass Live",
+  "description": "Plataforma interativa de quiz de Verdadeiro/Falso e Múltipla Escolha para professores, com controle de apresentação em tempo real, telão com gráficos ao vivo, nuvem de dados e pódio para os alunos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

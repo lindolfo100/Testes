@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Teacher user profiles
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId);
+      allow create, update: if isSignedIn() && (request.auth.uid == userId)
+        && incoming().uid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Quizzes created by teachers
+    match /quizzes/{quizId} {
+      allow get: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.isPublic == true);
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.isPublic == true);
+      allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid)
+        && incoming().title is string && incoming().title.size() <= 150;
+      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid)
+        && incoming().title is string && incoming().title.size() <= 150;
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
+    }
+
+    // Live Quiz Sessions
+    match /sessions/{sessionId} {
+      // Students and projection screen need to read session state in real-time
+      allow get: if isValidId(sessionId);
+      allow list: if true;
+
+      allow create: if isSignedIn() && incoming().hostId == request.auth.uid
+        && incoming().pin is string && incoming().pin.size() == 6;
+
+      allow update: if (isSignedIn() && existing().hostId == request.auth.uid)
+        || (incoming().diff(existing()).affectedKeys().hasOnly(['timeRemaining', 'lastActivityAt']));
+
+      allow delete: if isSignedIn() && existing().hostId == request.auth.uid;
+
+      // Players subcollection within the session
+      match /players/{playerId} {
+        allow get, list: if true;
+        allow create: if isValidId(playerId)
+          && incoming().nickname is string && incoming().nickname.size() <= 40
+          && incoming().sessionId == sessionId;
+        allow update: if isValidId(playerId)
+          && incoming().sessionId == sessionId;
+        allow delete: if isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid;
+      }
+
+      // Answers subcollection within the session
+      match /answers/{answerId} {
+        allow get, list: if true;
+        allow create: if isValidId(answerId)
+          && incoming().sessionId == sessionId
+          && incoming().answer is string && incoming().answer.size() <= 200;
+        allow update: if false;
+        allow delete: if isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid;
+      }
+    }
+  }
+}
