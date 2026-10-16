@@ -2,18 +2,29 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QuizClass Live - Quiz Interativo em Tempo Real</title>
-    <meta name="description" content="Plataforma interativa de quiz de Verdadeiro/Falso e Múltipla Escolha para professores, com controle de apresentação em tempo real, telão com gráficos ao vivo, nuvem de dados e pódio para os alunos." />
-    <meta property="og:title" content="QuizClass Live - Quiz Interativo em Tempo Real" />
-    <meta property="og:description" content="Plataforma interativa de quiz de Verdadeiro/Falso e Múltipla Escolha para professores, com controle de apresentação em tempo real, telão com gráficos ao vivo, nuvem de dados e pódio para os alunos." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
+    <title>Valendo! — Perguntas e Respostas ao Vivo em Sala de Aula</title>
+    <meta name="description" content="Valendo: plataforma leve e interativa para conduzir perguntas e respostas ao vivo em sala de aula com telão e participação pelo celular." />
+    <meta property="og:title" content="Valendo! — Perguntas e Respostas ao Vivo" />
+    <meta property="og:description" content="Plataforma leve e descontraída para conduzir perguntas e respostas ao vivo em sala de aula." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Mobile & PWA Standards -->
+    <meta name="theme-color" content="#09090b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Valendo!" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/valendo-icon.svg" />
+
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet" />
   </head>
-  <body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen">
+  <body class="bg-zinc-950 text-zinc-100 font-sans antialiased min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

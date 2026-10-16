@@ -1,30 +1,53 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider } from './context/AuthContext';
-import { Navbar } from './components/Navbar';
+import { Navbar, AppView } from './components/Navbar';
+import { WelcomeView } from './views/WelcomeView';
 import { TeacherDashboard } from './views/TeacherDashboard';
 import { TelaoView } from './views/TelaoView';
 import { StudentView } from './views/StudentView';
 import { SAMPLE_QUIZZES } from './data/sampleQuizzes';
 import { Quiz } from './types/quiz';
-import { getTeacherQuizzes } from './services/quizService';
+import { getTeacherQuizzes, createLiveSession } from './services/quizService';
+import { STORAGE_KEYS } from './constants/storage';
+import { OfflineIndicator } from './components/OfflineIndicator';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'dashboard' | 'student' | 'telao'>('dashboard');
+  const [currentView, setCurrentView] = useState<AppView>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlPin = params.get('pin')?.replace(/\D/g, '');
+    return urlPin && urlPin.length === 6 ? 'student' : 'welcome';
+  });
+
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [activeSessionPin, setActiveSessionPin] = useState<string | null>(null);
+  const [activeSessionPin, setActiveSessionPin] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlPin = params.get('pin')?.replace(/\D/g, '');
+    return urlPin && urlPin.length === 6 ? urlPin : null;
+  });
+
+  const [studentPrefilledPin, setStudentPrefilledPin] = useState<string | null>(null);
   const [quizzes, setQuizzes] = useState<Quiz[]>(SAMPLE_QUIZZES);
+  const [isLaunchingDemo, setIsLaunchingDemo] = useState(false);
 
   useEffect(() => {
-    // Pre-fetch quizzes
-    getTeacherQuizzes('all').then((data) => {
+    getTeacherQuizzes('guest').then((data) => {
       if (data && data.length > 0) {
         setQuizzes(data);
       }
     });
 
-    // Restore active session if present in sessionStorage
-    const savedSesId = sessionStorage.getItem('quiz_active_session_id');
-    const savedSesPin = sessionStorage.getItem('quiz_active_session_pin');
+    // Check URL parameter first (?pin=123456 from QR Code or Direct Link)
+    const params = new URLSearchParams(window.location.search);
+    const urlPin = params.get('pin')?.replace(/\D/g, '');
+    if (urlPin && urlPin.length === 6) {
+      setStudentPrefilledPin(urlPin);
+      setCurrentView('student');
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
+    const savedSesId = sessionStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION_ID);
+    const savedSesPin = sessionStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION_PIN);
     if (savedSesId && savedSesPin) {
       setActiveSessionId(savedSesId);
       setActiveSessionPin(savedSesPin);
@@ -34,29 +57,62 @@ export default function App() {
   const handleStartSession = (sessionId: string, pin: string) => {
     setActiveSessionId(sessionId);
     setActiveSessionPin(pin);
-    sessionStorage.setItem('quiz_active_session_id', sessionId);
-    sessionStorage.setItem('quiz_active_session_pin', pin);
+    sessionStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION_ID, sessionId);
+    sessionStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION_PIN, pin);
     setCurrentView('telao');
   };
 
-  const handleExitTelao = () => {
+  const handleQuickLaunchDemo = async () => {
+    setIsLaunchingDemo(true);
+    try {
+      const demoQuiz = quizzes[0] || SAMPLE_QUIZZES[0];
+      const session = await createLiveSession(demoQuiz, 'prof_demo', 'Professor(a)');
+      handleStartSession(session.id, session.pin);
+    } catch (err) {
+      console.error('Failed to launch demo session:', err);
+      setCurrentView('dashboard');
+    } finally {
+      setIsLaunchingDemo(false);
+    }
+  };
+
+  const handleExitTelao = (endRoom = false) => {
+    if (endRoom) {
+      setActiveSessionId(null);
+      setActiveSessionPin(null);
+      sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION_ID);
+      sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION_PIN);
+    }
     setCurrentView('dashboard');
   };
 
   return (
     <AuthProvider>
-      <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-zinc-800 selection:text-white">
         <Navbar
           currentView={currentView}
           onNavigate={(v) => setCurrentView(v)}
-          activeSessionPin={activeSessionPin}
+          activeSessionPin={activeSessionId ? activeSessionPin : null}
         />
 
         <main className="flex-1">
+          {currentView === 'welcome' && (
+            <WelcomeView
+              onSelectTeacher={() => setCurrentView('dashboard')}
+              onSelectStudent={(pinFromWelcome) => {
+                if (pinFromWelcome) setStudentPrefilledPin(pinFromWelcome);
+                setCurrentView('student');
+              }}
+              onQuickLaunchDemo={handleQuickLaunchDemo}
+              isLaunchingDemo={isLaunchingDemo}
+            />
+          )}
+
           {currentView === 'dashboard' && (
             <TeacherDashboard
               onStartSession={handleStartSession}
               onNavigateToStudent={() => setCurrentView('student')}
+              onQuizzesUpdated={(updated) => setQuizzes(updated)}
             />
           )}
 
@@ -71,17 +127,18 @@ export default function App() {
 
           {currentView === 'student' && (
             <StudentView
-              initialPin={activeSessionPin}
+              initialPin={studentPrefilledPin || activeSessionPin}
               quizzes={quizzes}
-              onBackToDashboard={() => setCurrentView('dashboard')}
+              onBackToDashboard={() => setCurrentView('welcome')}
             />
           )}
         </main>
 
-        {/* Minimal Subtle Footer */}
-        <footer className="border-t border-slate-800/80 py-4 px-6 text-center text-xs text-slate-500">
-          QuizClass Live · Plataforma Educacional de Perguntas & Respostas em Tempo Real
+        <footer className="border-t border-zinc-900/80 py-3.5 px-6 text-center text-[11px] text-zinc-500 font-mono">
+          Valendo! · Perguntas e Respostas em Tempo Real
         </footer>
+
+        <OfflineIndicator />
       </div>
     </AuthProvider>
   );

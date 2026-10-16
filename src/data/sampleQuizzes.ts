@@ -2,169 +2,183 @@ import { Quiz } from '../types/quiz';
 
 export const SAMPLE_QUIZZES: Quiz[] = [
   {
+    id: 'quiz-showcase-10-formatos',
+    ownerId: 'system',
+    title: 'Desafio Geral: 10 Formatos Interativos',
+    description: 'Demonstração completa dos 10 formatos: múltipla escolha, V/F, resposta curta, associação, ordenação, imagem, mídia, nuvem, enquete e discursiva.',
+    subject: 'Conhecimentos Gerais',
+    isPublic: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    questions: [
+      // 1. Múltipla escolha
+      {
+        id: 'q1_multipla',
+        type: 'multiple',
+        question: 'Qual é a capital do estado do Ceará?',
+        options: ['Sobral', 'Fortaleza', 'Juazeiro do Norte', 'Crato'],
+        correctAnswer: 'Fortaleza',
+        timeLimit: 20,
+        points: 1000,
+        explanation: 'Fortaleza foi fundada em 1726 e é a capital e maior cidade do estado do Ceará.',
+      },
+      // 2. Verdadeiro ou falso
+      {
+        id: 'q2_boolean',
+        type: 'boolean',
+        question: 'O Brasil é formado politicamente por 26 estados e 1 Distrito Federal.',
+        options: ['Verdadeiro', 'Falso'],
+        correctAnswer: 'Verdadeiro',
+        timeLimit: 15,
+        points: 1000,
+        explanation: 'A República Federativa do Brasil é composta por 26 estados federados e o Distrito Federal, totalizando 27 unidades federativas.',
+      },
+      // 3. Resposta curta ou campo de texto
+      {
+        id: 'q3_curta',
+        type: 'short_answer',
+        question: 'Qual é o nome do processo biológico pelo qual as plantas utilizam a luz solar para produzir seu próprio alimento?',
+        acceptedAnswers: ['fotossíntese', 'fotossintese', 'a fotossíntese', 'a fotossintese'],
+        correctAnswer: 'Fotossíntese',
+        timeLimit: 25,
+        points: 1000,
+        placeholder: 'Digite o termo biológico...',
+        explanation: 'A fotossíntese converte energia luminosa solar, água e gás carbônico em glicose e oxigênio.',
+      },
+      // 4. Associação de pares
+      {
+        id: 'q4_pares',
+        type: 'matching',
+        question: 'Associe cada bioma brasileiro à sua característica correspondente:',
+        pairs: [
+          { id: 'p1', left: 'Amazônia', right: 'Maior floresta tropical úmida' },
+          { id: 'p2', left: 'Caatinga', right: 'Clima semiárido e vegetação adaptada à seca' },
+          { id: 'p3', left: 'Pantanal', right: 'Maior planície inundável contínua do planeta' },
+          { id: 'p4', left: 'Cerrado', right: 'Savana brasileira rica em nascentes' },
+        ],
+        timeLimit: 30,
+        points: 1000,
+        explanation: 'O Brasil abriga biomas com especificidades climáticas e fitogeográficas únicas.',
+      },
+      // 5. Ordenação ou classificação
+      {
+        id: 'q5_ordem',
+        type: 'ordering',
+        question: 'Organize as etapas fundamentais do ciclo da água na sequência correta:',
+        itemsOrder: [
+          'Evaporação da água líquida',
+          'Condensação do vapor em nuvens',
+          'Precipitação na forma de chuva',
+          'Infiltração no solo e escoamento',
+        ],
+        timeLimit: 30,
+        points: 1000,
+        explanation: 'O ciclo hidrológico inicia com o aquecimento e evaporação, seguido de condensação, precipitação e escoamento/infiltração.',
+      },
+      // 6. Pergunta com imagem
+      {
+        id: 'q6_imagem',
+        type: 'image',
+        question: 'Observe a imagem do Sistema Solar: qual é o quarto planeta a partir do Sol, conhecido como planeta vermelho?',
+        mediaUrl: 'https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?w=800&auto=format&fit=crop&q=80',
+        mediaType: 'image',
+        options: ['Vênus', 'Terra', 'Marte', 'Júpiter'],
+        correctAnswer: 'Marte',
+        timeLimit: 20,
+        points: 1000,
+        explanation: 'Marte é o quarto planeta em distância do Sol e possui coloração avermelhada devido ao óxido de ferro em sua superfície.',
+      },
+      // 7. Pergunta baseada em vídeo ou áudio
+      {
+        id: 'q7_midia',
+        type: 'media',
+        question: 'Após escutar o áudio sonoro da floresta, qual grupo animal é o principal emissor desses cantos de alta frequência?',
+        mediaUrl: 'https://cdn.freesound.org/previews/563/563462_71257-lq.mp3',
+        mediaType: 'audio',
+        options: ['Aves canoras', 'Mamíferos marinhos', 'Répteis escamados', 'Anfíbios subterrâneos'],
+        correctAnswer: 'Aves canoras',
+        timeLimit: 25,
+        points: 1000,
+        explanation: 'O canto reproduzido é típico de passeriformes matutinos em ambientes de mata.',
+      },
+      // 8. Nuvem de palavras
+      {
+        id: 'q8_nuvem',
+        type: 'word_cloud',
+        question: 'Em uma ou duas palavras: o que significa uma boa aula para você?',
+        timeLimit: 25,
+        points: 500,
+        placeholder: 'Ex: Diálogo, Descoberta, Prática...',
+        explanation: 'As palavras mais citadas pelos participantes formam os maiores termos na nuvem.',
+      },
+      // 9. Enquete ou votação
+      {
+        id: 'q9_enquete',
+        type: 'poll',
+        question: 'Qual recurso didático você considera mais engajador durante uma explicação?',
+        options: [
+          'Quizzes interativos e gamificação',
+          'Discussão de casos e debates',
+          'Vídeos curtos e documentários',
+          'Exercícios práticos em equipe',
+        ],
+        timeLimit: 20,
+        points: 500,
+        explanation: 'Sondagem de opinião da turma para direcionar as próximas atividades.',
+      },
+      // 10. Resposta aberta ou discursiva
+      {
+        id: 'q10_aberta',
+        type: 'open_ended',
+        question: 'Como a tecnologia pode ajudar estudantes a aprenderem no seu próprio ritmo?',
+        timeLimit: 45,
+        points: 500,
+        placeholder: 'Escreva sua reflexão em 2 a 3 frases...',
+        explanation: 'Respostas individuais projetadas para reflexão coletiva mediada pelo professor.',
+      },
+    ],
+  },
+  {
     id: 'quiz-ciencia-planeta',
     ownerId: 'system',
-    title: 'Ciências: Terra, Atmosfera e Universo',
-    description: 'Quiz interativo misto de Verdadeiro ou Falso e Múltipla Escolha sobre o Sistema Solar e a Terra.',
-    subject: 'Ciências Naturais',
+    title: 'Ciências: Terra e Universo',
+    description: 'Questionário sobre o Sistema Solar, camada de ozônio e atmosfera.',
+    subject: 'Ciências',
     isPublic: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     questions: [
       {
-        id: 'q1',
+        id: 'qc1',
         type: 'boolean',
         question: 'O Sol é uma estrela de tamanho médio conhecida como anã amarela.',
         options: ['Verdadeiro', 'Falso'],
         correctAnswer: 'Verdadeiro',
         timeLimit: 20,
         points: 1000,
-        explanation: 'O Sol é classificado cientificamente como uma estrela anã amarela da sequência principal (tipo espectral G2V).'
+        explanation: 'O Sol é classificado cientificamente como uma estrela da sequência principal do tipo espectral G2V.',
       },
       {
-        id: 'q2',
+        id: 'qc2',
         type: 'multiple',
         question: 'Qual é o gás mais abundante na atmosfera terrestre?',
         options: ['Oxigênio (O₂)', 'Nitrogênio (N₂)', 'Gás Carbônico (CO₂)', 'Hidrogênio (H₂)'],
         correctAnswer: 'Nitrogênio (N₂)',
-        timeLimit: 25,
-        points: 1000,
-        explanation: 'O nitrogênio compõe aproximadamente 78% da atmosfera terrestre, enquanto o oxigênio representa cerca de 21%.'
-      },
-      {
-        id: 'q3',
-        type: 'boolean',
-        question: 'A camada de ozônio está localizada principalmente na troposfera, onde ocorrem as chuvas.',
-        options: ['Verdadeiro', 'Falso'],
-        correctAnswer: 'Falso',
         timeLimit: 20,
         points: 1000,
-        explanation: 'A camada protetora de ozônio fica concentrada na estratosfera, entre 15 km e 35 km de altitude.'
+        explanation: 'O nitrogênio compõe aproximadamente 78% da atmosfera terrestre, enquanto o oxigênio representa cerca de 21%.',
       },
       {
-        id: 'q4',
-        type: 'multiple',
-        question: 'Qual órgão das plantas é o principal responsável pela fotossíntese e transpiração?',
-        options: ['Raiz', 'Caule', 'Folha', 'Semente'],
-        correctAnswer: 'Folha',
+        id: 'qc3',
+        type: 'short_answer',
+        question: 'Qual camada da atmosfera contém a maior concentração de gás ozônio (O₃)?',
+        acceptedAnswers: ['estratosfera', 'a estratosfera'],
+        correctAnswer: 'Estratosfera',
         timeLimit: 20,
         points: 1000,
-        explanation: 'As folhas contêm grande concentração de cloroplastos e estômatos responsáveis pela fotossíntese e troca gasosa.'
+        placeholder: 'Digite a camada atmosférica...',
+        explanation: 'A camada de ozônio protetora contra raios ultravioleta situa-se na estratosfera, entre 15 e 35 km de altitude.',
       },
-      {
-        id: 'q5',
-        type: 'boolean',
-        question: 'A velocidade da luz no vácuo é de cerca de 300.000 quilômetros por segundo.',
-        options: ['Verdadeiro', 'Falso'],
-        correctAnswer: 'Verdadeiro',
-        timeLimit: 15,
-        points: 1000,
-        explanation: 'A constante física fundamental c é exatamente 299.792.458 m/s (aproximadamente 300.000 km/s).'
-      }
-    ]
+    ],
   },
-  {
-    id: 'quiz-historia-brasil',
-    ownerId: 'system',
-    title: 'História do Brasil e Cidadania',
-    description: 'Desafio dinâmico com fatos históricos, datas marcantes e cidadania brasileira.',
-    subject: 'História',
-    isPublic: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    questions: [
-      {
-        id: 'qh1',
-        type: 'multiple',
-        question: 'Em que ano foi promulgada a atual Constituição Federal do Brasil (Constituição Cidadã)?',
-        options: ['1964', '1985', '1988', '1992'],
-        correctAnswer: '1988',
-        timeLimit: 25,
-        points: 1000,
-        explanation: 'A Carta Magna brasileira foi promulgada em 5 de outubro de 1988 sob liderança de Ulysses Guimarães.'
-      },
-      {
-        id: 'qh2',
-        type: 'boolean',
-        question: 'A Lei Áurea foi assinada no ano de 1888 pela Princesa Isabel, abolindo formalmente a escravidão no Brasil.',
-        options: ['Verdadeiro', 'Falso'],
-        correctAnswer: 'Verdadeiro',
-        timeLimit: 20,
-        points: 1000,
-        explanation: 'Assinada em 13 de maio de 1888, extinguiu legalmente a escravidão no território brasileiro.'
-      },
-      {
-        id: 'qh3',
-        type: 'multiple',
-        question: 'Qual cidade foi a primeira capital do Brasil antes de ser transferida para o Rio de Janeiro?',
-        options: ['Salvador', 'São Paulo', 'Recife', 'Ouro Preto'],
-        correctAnswer: 'Salvador',
-        timeLimit: 20,
-        points: 1000,
-        explanation: 'Salvador (BA) foi fundada em 1549 como a primeira capital do Brasil colonial, sede do governo geral até 1763.'
-      },
-      {
-        id: 'qh4',
-        type: 'boolean',
-        question: 'O Tratado de Tordesilhas dividiu as terras descobertas entre Portugal e a França.',
-        options: ['Verdadeiro', 'Falso'],
-        correctAnswer: 'Falso',
-        timeLimit: 20,
-        points: 1000,
-        explanation: 'O Tratado de Tordesilhas (1494) foi celebrado entre o Reino de Portugal e a Coroa de Castela (Espanha).'
-      }
-    ]
-  },
-  {
-    id: 'quiz-matematica-logica',
-    ownerId: 'system',
-    title: 'Matemática e Raciocínio Rápido',
-    description: 'Perguntas rápidas de lógica, frações e geometria para aquecer a mente.',
-    subject: 'Matemática',
-    isPublic: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    questions: [
-      {
-        id: 'qm1',
-        type: 'boolean',
-        question: 'O número 2 é o único número par que é primo.',
-        options: ['Verdadeiro', 'Falso'],
-        correctAnswer: 'Verdadeiro',
-        timeLimit: 15,
-        points: 1000,
-        explanation: 'Todos os outros números pares são divisíveis por 2 além de 1 e de si mesmos, logo nenhum outro par é primo.'
-      },
-      {
-        id: 'qm2',
-        type: 'multiple',
-        question: 'Qual é o valor da soma dos ângulos internos de qualquer triângulo?',
-        options: ['90 graus', '180 graus', '270 graus', '360 graus'],
-        correctAnswer: '180 graus',
-        timeLimit: 20,
-        points: 1000,
-        explanation: 'Na geometria euclidiana plana, a soma das medidas dos três ângulos internos de um triângulo é sempre 180°.'
-      },
-      {
-        id: 'qm3',
-        type: 'boolean',
-        question: 'A raiz quadrada de 144 é igual a 14.',
-        options: ['Verdadeiro', 'Falso'],
-        correctAnswer: 'Falso',
-        timeLimit: 15,
-        points: 1000,
-        explanation: 'A raiz quadrada de 144 é 12, pois 12 × 12 = 144 (14 × 14 = 196).'
-      },
-      {
-        id: 'qm4',
-        type: 'multiple',
-        question: 'Se um produto custa R$ 80,00 e recebe 25% de desconto, qual será o novo preço?',
-        options: ['R$ 55,00', 'R$ 60,00', 'R$ 65,00', 'R$ 70,00'],
-        correctAnswer: 'R$ 60,00',
-        timeLimit: 25,
-        points: 1000,
-        explanation: '25% de R$ 80,00 é R$ 20,00 (80 ÷ 4). Logo, R$ 80 - R$ 20 = R$ 60,00.'
-      }
-    ]
-  }
 ];

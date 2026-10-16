@@ -1,12 +1,26 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { Player } from '../types/quiz';
-import { Trophy, Medal, Award, Flame, RotateCcw, Download } from 'lucide-react';
+import { Player, QuizReport } from '../types/quiz';
+import { exportReportToCSV } from '../services/reportService';
+import { soundEffects } from '../lib/soundEffects';
+import {
+  Trophy,
+  Medal,
+  MedalMilitary,
+  Flame,
+  ArrowCounterClockwise,
+  DownloadSimple,
+  Crown,
+  ChartBar,
+  X,
+  CheckCircle,
+} from '@phosphor-icons/react';
 
 interface PodiumProps {
   players: Player[];
   quizTitle: string;
   totalQuestions: number;
+  report?: QuizReport | null;
   onRestart: () => void;
   onExit: () => void;
 }
@@ -15,12 +29,17 @@ export const Podium: React.FC<PodiumProps> = ({
   players,
   quizTitle,
   totalQuestions,
+  report,
   onRestart,
   onExit,
 }) => {
-  // Fire confetti on mount
+  const [showBreakdown, setShowBreakdown] = useState(false);
+
   useEffect(() => {
-    const duration = 3.5 * 1000;
+    // Play celebratory Web Audio fanfare
+    soundEffects.playFanfare();
+
+    const duration = 2.8 * 1000;
     const end = Date.now() + duration;
 
     const frame = () => {
@@ -29,14 +48,14 @@ export const Podium: React.FC<PodiumProps> = ({
         angle: 60,
         spread: 55,
         origin: { x: 0 },
-        colors: ['#38BDF8', '#F59E0B', '#10B981', '#EC4899', '#6366F1'],
+        colors: ['#ffffff', '#fbbf24', '#f59e0b', '#38bdf8', '#34d399'],
       });
       confetti({
         particleCount: 4,
         angle: 120,
         spread: 55,
         origin: { x: 1 },
-        colors: ['#38BDF8', '#F59E0B', '#10B981', '#EC4899', '#6366F1'],
+        colors: ['#ffffff', '#fbbf24', '#f59e0b', '#38bdf8', '#34d399'],
       });
 
       if (Date.now() < end) {
@@ -52,7 +71,11 @@ export const Podium: React.FC<PodiumProps> = ({
   const third = sortedPlayers[2];
   const rest = sortedPlayers.slice(3);
 
-  const exportCSV = () => {
+  const handleExportCSV = () => {
+    if (report) {
+      exportReportToCSV(report);
+      return;
+    }
     const headers = ['Posição,Nome do Aluno,Pontuação Total,Acertos Consecutivos (Streak)\n'];
     const rows = sortedPlayers.map(
       (p, i) => `${i + 1},"${p.nickname}",${p.score},${p.streak}\n`
@@ -68,137 +91,223 @@ export const Podium: React.FC<PodiumProps> = ({
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-10 py-6 px-4">
+    <div className="w-full max-w-2xl mx-auto space-y-6 py-6 px-4">
       {/* Title */}
-      <div className="text-center space-y-2">
-        <span className="text-xs font-semibold text-amber-400 uppercase tracking-widest flex items-center justify-center gap-1.5">
-          <Trophy className="w-4 h-4 text-amber-400" /> Pódio da Turma
+      <div className="text-center space-y-1">
+        <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-widest block font-semibold">
+          Pódio Final da Turma
         </span>
-        <h2 className="text-3xl sm:text-4xl font-extrabold text-white">{quizTitle}</h2>
-        <p className="text-sm text-slate-400">
-          Quiz finalizado com {totalQuestions} perguntas · {players.length} estudantes participaram
-        </p>
+        <h2 className="text-xl sm:text-2xl font-bold text-zinc-100">{quizTitle}</h2>
+        <div className="flex items-center justify-center gap-3 text-xs text-zinc-400 font-mono">
+          <span>{totalQuestions} questões</span>
+          <span>·</span>
+          <span>{players.length} participantes</span>
+          {report && (
+            <>
+              <span>·</span>
+              <span className="text-emerald-400 font-semibold">{report.averageAccuracy}% acerto geral</span>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* 3D-style Podium Pillars */}
-      <div className="flex items-end justify-center gap-3 sm:gap-6 pt-12 pb-4">
+      {/* Sleek Minimalist Podium */}
+      <div className="flex items-end justify-center gap-3 pt-6 pb-2">
         {/* 2nd Place */}
         {second && (
-          <div className="flex flex-col items-center flex-1 max-w-[180px]">
-            <div className="relative mb-2 flex flex-col items-center">
-              <div className="w-12 h-12 rounded-full bg-slate-300 text-slate-900 flex items-center justify-center font-bold text-lg shadow-lg border-2 border-white mb-1">
-                2
-              </div>
-              <span className="font-bold text-white text-sm text-center truncate max-w-[140px]">
+          <div className="flex flex-col items-center flex-1 max-w-[130px]">
+            <div className="text-center mb-2">
+              <span className="text-xs font-semibold text-zinc-300 block truncate max-w-[110px]">
                 {second.nickname}
               </span>
-              <span className="text-xs text-slate-300 font-mono tabular-nums font-semibold">
+              <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
                 {second.score} pts
               </span>
             </div>
-            <div className="w-full h-36 bg-gradient-to-t from-slate-700 to-slate-500 rounded-t-2xl shadow-xl flex items-center justify-center border-t-2 border-slate-300">
-              <Medal className="w-8 h-8 text-slate-200" />
+            <div className="w-full h-28 bg-zinc-850 border border-zinc-750 rounded-t-2xl flex flex-col items-center justify-center space-y-1 shadow-sm">
+              <span className="text-xs font-mono font-bold text-zinc-400">2</span>
+              <Medal size={22} weight="fill" className="text-zinc-400" />
             </div>
           </div>
         )}
 
         {/* 1st Place */}
         {first && (
-          <div className="flex flex-col items-center flex-1 max-w-[200px] -mt-6">
-            <div className="relative mb-2 flex flex-col items-center">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 text-amber-950 flex items-center justify-center font-extrabold text-2xl shadow-2xl border-4 border-amber-200 ring-4 ring-amber-400/30 mb-1 animate-bounce">
-                👑
-              </div>
-              <span className="font-extrabold text-amber-300 text-base sm:text-lg text-center truncate max-w-[160px]">
+          <div className="flex flex-col items-center flex-1 max-w-[150px] -mt-6">
+            <div className="text-center mb-2">
+              <Crown size={22} weight="fill" className="text-amber-400 mx-auto mb-0.5" />
+              <span className="text-sm font-bold text-zinc-100 block truncate max-w-[130px]">
                 {first.nickname}
               </span>
-              <span className="text-sm text-amber-200 font-mono tabular-nums font-bold">
+              <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
                 {first.score} pts
               </span>
             </div>
-            <div className="w-full h-48 bg-gradient-to-t from-amber-600 via-amber-500 to-amber-400 rounded-t-2xl shadow-2xl flex items-center justify-center border-t-4 border-amber-200">
-              <Trophy className="w-12 h-12 text-amber-950" />
+            <div className="w-full h-40 bg-zinc-800 border border-zinc-700 rounded-t-2xl flex flex-col items-center justify-center space-y-1 shadow-sm">
+              <span className="text-sm font-mono font-bold text-zinc-200">1</span>
+              <Trophy size={28} weight="fill" className="text-zinc-100" />
             </div>
           </div>
         )}
 
         {/* 3rd Place */}
         {third && (
-          <div className="flex flex-col items-center flex-1 max-w-[180px]">
-            <div className="relative mb-2 flex flex-col items-center">
-              <div className="w-12 h-12 rounded-full bg-amber-700 text-amber-100 flex items-center justify-center font-bold text-lg shadow-lg border-2 border-amber-500 mb-1">
-                3
-              </div>
-              <span className="font-bold text-white text-sm text-center truncate max-w-[140px]">
+          <div className="flex flex-col items-center flex-1 max-w-[130px]">
+            <div className="text-center mb-2">
+              <span className="text-xs font-semibold text-zinc-300 block truncate max-w-[110px]">
                 {third.nickname}
               </span>
-              <span className="text-xs text-slate-300 font-mono tabular-nums font-semibold">
+              <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
                 {third.score} pts
               </span>
             </div>
-            <div className="w-full h-28 bg-gradient-to-t from-amber-900 to-amber-700 rounded-t-2xl shadow-xl flex items-center justify-center border-t-2 border-amber-500">
-              <Award className="w-7 h-7 text-amber-300" />
+            <div className="w-full h-20 bg-zinc-900 border border-zinc-800 rounded-t-2xl flex flex-col items-center justify-center space-y-1 shadow-sm">
+              <span className="text-xs font-mono font-bold text-zinc-400">3</span>
+              <MedalMilitary size={20} weight="fill" className="text-zinc-400" />
             </div>
           </div>
         )}
       </div>
 
-      {/* Leaderboard Table for remaining students */}
+      {/* Demais Participantes */}
       {rest.length > 0 && (
-        <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 sm:p-6 space-y-3">
-          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Demais Participantes da Turma
-          </h4>
-          <div className="divide-y divide-slate-700/60 max-h-60 overflow-y-auto pr-2">
-            {rest.map((p, idx) => (
-              <div key={p.id} className="py-2.5 flex items-center justify-between text-sm">
-                <div className="flex items-center gap-3">
-                  <span className="w-6 text-slate-400 font-mono text-xs font-semibold">
-                    #{idx + 4}
-                  </span>
-                  <span className="font-medium text-slate-200">{p.nickname}</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  {p.streak > 1 && (
-                    <span className="text-xs text-amber-400 flex items-center gap-1 font-mono">
-                      <Flame className="w-3.5 h-3.5" /> {p.streak}x
-                    </span>
-                  )}
-                  <span className="font-mono tabular-nums font-bold text-white">
-                    {p.score} pts
-                  </span>
-                </div>
+        <div className="space-y-1.5 pt-2 max-h-48 overflow-y-auto pr-1">
+          {rest.map((p, idx) => (
+            <div
+              key={p.id}
+              className="py-2 px-3 rounded-xl bg-zinc-900/40 border border-zinc-800/50 flex items-center justify-between text-xs"
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="w-5 text-zinc-400 font-mono text-[11px]">#{idx + 4}</span>
+                <span className="text-zinc-200 font-medium">{p.nickname}</span>
               </div>
-            ))}
-          </div>
+              <div className="flex items-center gap-2">
+                {p.streak > 1 && (
+                  <span className="text-[10px] text-amber-400 flex items-center gap-0.5 font-mono">
+                    <Flame size={12} weight="fill" /> {p.streak}x
+                  </span>
+                )}
+                <span className="font-mono text-zinc-300 font-semibold tabular-nums">{p.score} pts</span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Control Buttons */}
-      <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
+      {/* Action Buttons */}
+      <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+        {report && report.questionsSummary.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowBreakdown(true)}
+            className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors flex items-center gap-1.5"
+          >
+            <ChartBar size={14} weight="bold" />
+            <span>Ver Diagnóstico da Turma</span>
+          </button>
+        )}
+
         <button
-          onClick={exportCSV}
-          className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold border border-slate-600 transition-colors flex items-center gap-2"
+          onClick={handleExportCSV}
+          className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-xs font-medium border border-zinc-800 transition-colors flex items-center gap-1.5"
+          title="Baixar planilha CSV com o resultado de todos os alunos"
         >
-          <Download className="w-4 h-4" />
-          <span>Exportar Relatório (CSV)</span>
+          <DownloadSimple size={14} weight="bold" />
+          <span>Exportar Relatório CSV</span>
         </button>
 
         <button
           onClick={onRestart}
-          className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-md transition-colors flex items-center gap-2"
+          className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5"
         >
-          <RotateCcw className="w-4 h-4" />
-          <span>Nova Rodada com a Turma</span>
+          <ArrowCounterClockwise size={14} weight="bold" />
+          <span>Reiniciar Sala</span>
         </button>
 
         <button
           onClick={onExit}
-          className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium transition-colors"
+          className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-400 hover:text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors"
         >
-          Voltar ao Painel
+          Concluir e Sair
         </button>
       </div>
+
+      {/* Modal: Detailed Question Performance Breakdown */}
+      {showBreakdown && report && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl">
+            <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-zinc-100 text-sm">Diagnóstico da Turma por Questão</h3>
+                <span className="text-[11px] text-zinc-400 font-mono">
+                  Média de Acertos: {report.averageAccuracy}% · {report.totalPlayers} Alunos
+                </span>
+              </div>
+              <button
+                onClick={() => setShowBreakdown(false)}
+                className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                <X size={16} weight="bold" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-3">
+              {report.questionsSummary.map((q) => (
+                <div
+                  key={q.questionIndex}
+                  className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800/80 space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between text-zinc-400 text-[11px]">
+                    <span className="font-mono font-bold text-zinc-300">
+                      Questão #{q.questionIndex + 1}
+                    </span>
+                    <span
+                      className={`font-mono font-bold px-2 py-0.5 rounded text-[10px] ${
+                        q.accuracyPercentage >= 70
+                          ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30'
+                          : q.accuracyPercentage >= 40
+                          ? 'bg-amber-950/60 text-amber-400 border border-amber-500/30'
+                          : 'bg-rose-950/60 text-rose-400 border border-rose-500/30'
+                      }`}
+                    >
+                      {q.accuracyPercentage}% de acerto
+                    </span>
+                  </div>
+
+                  <p className="text-zinc-100 font-medium leading-snug">{q.questionText}</p>
+
+                  <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-400 pt-1">
+                    <span className="flex items-center gap-1 text-emerald-400">
+                      <CheckCircle size={13} weight="fill" />
+                      {q.correctAnswers} acertos
+                    </span>
+                    <span>·</span>
+                    <span>{q.totalAnswers} respostas computadas</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-5 py-3 border-t border-zinc-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="text-xs text-zinc-300 hover:text-white flex items-center gap-1.5"
+              >
+                <DownloadSimple size={13} weight="bold" />
+                <span>Exportar CSV</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBreakdown(false)}
+                className="px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

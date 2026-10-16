@@ -1,6 +1,6 @@
 {
-  "name": "QuizClass Live",
-  "description": "Plataforma interativa de quiz de Verdadeiro/Falso e Múltipla Escolha para professores, com controle de apresentação em tempo real, telão com gráficos ao vivo, nuvem de dados e pódio para os alunos.",
+  "name": "Valendo",
+  "description": "Plataforma minimalista e dinâmica para perguntas e respostas ao vivo em sala de aula, com controle em tempo real para o professor, telão interativo e votação instantânea pelo celular.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

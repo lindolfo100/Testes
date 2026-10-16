@@ -1,4 +1,6 @@
 import express from 'express';
+import http from 'http';
+import os from 'os';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
@@ -12,90 +14,45 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
+let activeServerPort = PORT;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Initialize GoogleGenAI client with required 'aistudio-build' telemetry header
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
-
-// Fallback heuristic parser in case Gemini API is temporarily 503 / unavailable
-function parseTextFallback(rawText: string, questionType: string, defaultTimeLimit: number) {
-  const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const questions: any[] = [];
-  let currentQ: any = null;
-
-  for (const line of lines) {
-    // Check if line looks like question start (e.g., "1. ", "1 - ", "Pergunta 1:", "Q1:")
-    const qMatch = line.match(/^(\d+[\.\-\)]|pergunta\s*\d+:?|q\d+:?)\s*(.*)/i);
-    const ansMatch = line.match(/^(r:|resposta:|gabarito:|correta:)\s*(.*)/i);
-
-    if (qMatch) {
-      if (currentQ && currentQ.question) {
-        questions.push(currentQ);
+function getLocalLanIp(): string | null {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
       }
-      const qText = qMatch[2] || line;
-      const isBool = questionType === 'boolean' || (questionType === 'mixed' && questions.length % 2 === 0);
-      currentQ = {
-        id: 'q_local_' + Date.now().toString(36) + '_' + questions.length,
-        type: isBool ? 'boolean' : 'multiple',
-        question: qText,
-        options: isBool ? ['Verdadeiro', 'Falso'] : ['Opção A', 'Opção B', 'Opção C', 'Opção D'],
-        correctAnswer: isBool ? 'Verdadeiro' : 'Opção A',
-        timeLimit: defaultTimeLimit,
-        points: 1000,
-        explanation: 'Questão organizada a partir do material do professor.',
-      };
-    } else if (ansMatch && currentQ) {
-      const ansVal = ansMatch[2].trim();
-      if (currentQ.type === 'boolean') {
-        currentQ.correctAnswer = ansVal.toLowerCase().includes('fals') ? 'Falso' : 'Verdadeiro';
-      } else {
-        currentQ.correctAnswer = ansVal;
-        if (!currentQ.options.includes(ansVal)) {
-          currentQ.options[0] = ansVal;
-        }
-      }
-      currentQ.explanation = `Resposta confirmada pelo professor: ${ansVal}`;
-    } else if (currentQ && !currentQ.question.includes('?')) {
-      currentQ.question += ' ' + line;
     }
   }
+  return null;
+}
 
-  if (currentQ && currentQ.question) {
-    questions.push(currentQ);
+app.get('/api/network-info', (_req, res) => {
+  res.json({
+    lanIp: getLocalLanIp(),
+    port: activeServerPort,
+  });
+});
+
+import { parseEducationalTextToQuestions } from './src/lib/quizParser.js';
+
+// Lazy client helper: only instantiates GoogleGenAI when an API key is actually provided
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    return null;
   }
-
-  if (questions.length === 0) {
-    // If no numbered lines found, create questions from paragraph chunks
-    const paragraphs = rawText.split(/\n\s*\n/).filter((p) => p.trim().length > 10);
-    paragraphs.forEach((p, idx) => {
-      const isBool = questionType === 'boolean' || (questionType === 'mixed' && idx % 2 === 0);
-      questions.push({
-        id: 'q_local_' + Date.now().toString(36) + '_' + idx,
-        type: isBool ? 'boolean' : 'multiple',
-        question: p.trim(),
-        options: isBool ? ['Verdadeiro', 'Falso'] : ['Correto', 'Incorreto', 'Parcialmente Correto', 'Não se Aplica'],
-        correctAnswer: isBool ? 'Verdadeiro' : 'Correto',
-        timeLimit: defaultTimeLimit,
-        points: 1000,
-        explanation: 'Questão estruturada a partir do texto do professor.',
-      });
-    });
-  }
-
-  return {
-    title: 'Quiz Organizado a partir do Texto',
-    subject: 'Geral',
-    description: 'Questões extraídas com fidelidade a partir do conteúdo colado.',
-    questions,
-  };
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
 }
 
 // Endpoint: Generate or organize quiz questions with Gemini, including fallback models and graceful recovery
@@ -104,6 +61,22 @@ app.post('/api/gemini/generate-quiz', async (req, res) => {
 
   if (!text || typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: 'O texto ou tema deve ser fornecido.' });
+  }
+
+  const ai = getGeminiClient();
+
+  // If no Gemini API key is configured in .env:
+  if (!ai) {
+    if (mode === 'paste') {
+      console.log('Gemini API key não configurada: usando extrator local de perguntas.');
+      const parsed = parseEducationalTextToQuestions(text, questionType, defaultTimeLimit);
+      return res.json(parsed);
+    } else {
+      return res.status(400).json({
+        error:
+          'Para gerar questionários automáticos por tema com a IA Gemini, configure a variável GEMINI_API_KEY no arquivo .env. Se preferir, use a aba "Colar Questões" que funciona 100% offline!',
+      });
+    }
   }
 
   const formatDescription =
@@ -195,7 +168,7 @@ Siga com rigor:
   if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
     if (mode === 'paste') {
       console.log('Gemini API busy: using local faithful text parser fallback.');
-      parsed = parseTextFallback(text, questionType, defaultTimeLimit);
+      parsed = parseEducationalTextToQuestions(text, questionType, defaultTimeLimit);
     } else {
       const is503 = lastError?.status === 503 || String(lastError?.message).includes('high demand') || String(lastError?.message).includes('503');
       const errorMessage = is503
@@ -231,6 +204,8 @@ Siga com rigor:
 });
 
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req, res) => {
@@ -238,14 +213,34 @@ async function startServer() {
     });
   } else {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`QuizClass Live full-stack server running on http://0.0.0.0:${PORT}`);
+  let currentPort = Number(process.env.PORT) || PORT;
+
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Porta ${currentPort} ocupada. Alternando automaticamente para a porta ${currentPort + 1}...`);
+      currentPort += 1;
+      httpServer.listen(currentPort, '0.0.0.0');
+    } else {
+      throw err;
+    }
+  });
+
+  httpServer.listen(currentPort, '0.0.0.0', () => {
+    activeServerPort = currentPort;
+    const lanIp = getLocalLanIp();
+    console.log(`Valendo Live full-stack server running on http://localhost:${currentPort}`);
+    if (lanIp) {
+      console.log(`Acesso na rede local (Wi-Fi/Celular): http://${lanIp}:${currentPort}`);
+    }
   });
 }
 

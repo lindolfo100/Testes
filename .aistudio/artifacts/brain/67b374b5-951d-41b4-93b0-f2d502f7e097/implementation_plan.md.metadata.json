@@ -1,6 +1,6 @@
 {
-  "summary": "Plano de implementação para o Criador e Organizador de Perguntas com Inteligência Artificial Gemini, permitindo ao professor colar textos brutos com perguntas/respostas ou gerar por tema, escolhendo entre Verdadeiro/Falso, Múltipla Escolha ou Mistas com total fidelidade ao conteúdo.",
-  "updatedAt": "2026-10-15T18:16:51.386009173Z",
+  "summary": "Plano de produção completo para o QuizClass Live: QR Code de acesso instantâneo sem digitar PIN, efeitos sonoros sintetizados via Web Audio API com controle de mudo, persistência de relatórios históricos consolidados no Firestore e suporte a Progressive Web App (PWA) instalável para celular e tablet.",
+  "updatedAt": "2026-10-16T14:38:43.007768801Z",
   "requestFeedback": true,
   "userFacing": true
 }

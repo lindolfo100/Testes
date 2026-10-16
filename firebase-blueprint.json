@@ -23,7 +23,7 @@
         "title": { "type": "string", "maxLength": 150 },
         "description": { "type": "string", "maxLength": 500 },
         "subject": { "type": "string", "maxLength": 50 },
-        "isPublic": { "type": "boolean" },
+        "isPublic": { "boolean": true },
         "questions": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -84,6 +84,27 @@
         "submittedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["sessionId", "questionIndex", "playerId", "answer"]
+    },
+    "reports": {
+      "title": "Report",
+      "description": "Consolidated class report and analytics of a completed quiz session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "quizId": { "type": "string" },
+        "quizTitle": { "type": "string", "maxLength": 150 },
+        "subject": { "type": "string", "maxLength": 50 },
+        "totalQuestions": { "type": "integer" },
+        "totalPlayers": { "type": "integer" },
+        "averageAccuracy": { "type": "number" },
+        "top3": { "type": "array" },
+        "playersRanking": { "type": "array" },
+        "questionsSummary": { "type": "array" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teacherId", "sessionId", "quizTitle", "totalQuestions", "totalPlayers"]
     }
   },
   "firestore": {
@@ -106,6 +127,10 @@
     "/sessions/{sessionId}/answers/{answerId}": {
       "schema": { "$ref": "#/entities/answers" },
       "description": "Individual answers submitted by students in a session"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/reports" },
+      "description": "Historical consolidated class analytics for teachers"
     }
   }
 }

@@ -1,10 +1,22 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { CheckCircle2, LogIn, LogOut, User as UserIcon, MonitorPlay, Smartphone } from 'lucide-react';
+import { ValendoLogo } from './BrandIllustrations';
+import {
+  House,
+  ChalkboardSimple,
+  DeviceMobile,
+  Monitor,
+  SignIn,
+  SignOut,
+  User as UserIcon,
+} from '@phosphor-icons/react';
+import { PWAInstallButton } from './PWAInstallButton';
+
+export type AppView = 'welcome' | 'dashboard' | 'student' | 'telao';
 
 interface NavbarProps {
-  currentView: 'dashboard' | 'student' | 'telao';
-  onNavigate: (view: 'dashboard' | 'student' | 'telao') => void;
+  currentView: AppView;
+  onNavigate: (view: AppView) => void;
   activeSessionPin?: string | null;
 }
 
@@ -12,94 +24,113 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, activeS
   const { user, signInWithGoogle, signOutUser } = useAuth();
 
   return (
-    <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
-        {/* Zone 1: Brand Wordmark */}
+    <header className="border-b border-zinc-800/60 bg-zinc-950/85 backdrop-blur-xl sticky top-0 z-50">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-3">
+        {/* Playful Brand Logo */}
         <button
-          onClick={() => onNavigate('dashboard')}
-          className="flex items-center gap-2.5 text-left font-bold text-lg sm:text-xl text-white tracking-tight hover:opacity-90 transition-opacity whitespace-nowrap shrink-0"
+          type="button"
+          onClick={() => onNavigate('welcome')}
+          className="text-left focus:outline-none"
+          title="Voltar à tela de boas-vindas"
         >
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-sm">
-            <CheckCircle2 className="w-5 h-5" />
-          </div>
-          <span>QuizClass Live</span>
+          <ValendoLogo size="md" />
         </button>
 
-        {/* Zone 2: Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-300">
+        {/* Minimal Navigation Pills */}
+        <nav className="flex items-center p-1 bg-zinc-900/70 rounded-xl border border-zinc-800/70 text-xs">
           <button
-            onClick={() => onNavigate('dashboard')}
-            className={`transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
-              currentView === 'dashboard'
-                ? 'text-indigo-400 font-semibold border-b-2 border-indigo-400'
-                : 'hover:text-white'
+            type="button"
+            onClick={() => onNavigate('welcome')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+              currentView === 'welcome'
+                ? 'bg-zinc-800 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Painel do Professor
+            <House size={15} weight={currentView === 'welcome' ? 'fill' : 'regular'} />
+            <span className="hidden sm:inline">Início</span>
           </button>
 
           <button
-            onClick={() => onNavigate('student')}
-            className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
-              currentView === 'student'
-                ? 'text-indigo-400 font-semibold border-b-2 border-indigo-400'
-                : 'hover:text-white'
+            type="button"
+            onClick={() => onNavigate('dashboard')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+              currentView === 'dashboard'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <Smartphone className="w-4 h-4" />
-            <span>Entrar como Aluno</span>
+            <ChalkboardSimple size={15} weight={currentView === 'dashboard' ? 'bold' : 'regular'} />
+            <span className="hidden sm:inline">Professor</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigate('student')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+              currentView === 'student'
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <DeviceMobile size={15} weight={currentView === 'student' ? 'bold' : 'regular'} />
+            <span className="hidden sm:inline">Aluno</span>
           </button>
 
           {activeSessionPin && (
             <button
+              type="button"
               onClick={() => onNavigate('telao')}
-              className={`flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 pb-0.5 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ml-0.5 ${
                 currentView === 'telao'
-                  ? 'text-indigo-400 font-semibold border-b-2 border-indigo-400'
-                : 'hover:text-white text-emerald-400'
+                  ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/40'
+                  : 'text-emerald-400 hover:text-emerald-300'
               }`}
+              title="Retornar ao Telão ativo"
             >
-              <MonitorPlay className="w-4 h-4" />
-              <span>Telão Ativo ({activeSessionPin})</span>
+              <Monitor size={15} weight={currentView === 'telao' ? 'bold' : 'regular'} />
+              <span className="font-mono font-bold">{activeSessionPin}</span>
             </button>
           )}
         </nav>
 
-        {/* Zone 3: Primary Action */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* User Account & PWA Install */}
+        <div className="flex items-center gap-2">
+          <PWAInstallButton />
           {user ? (
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 text-xs text-slate-300">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 text-xs text-zinc-300 px-2 py-1 rounded-lg">
                 {user.photoURL ? (
                   <img
                     src={user.photoURL}
                     alt={user.displayName || 'Professor'}
-                    className="w-7 h-7 rounded-full border border-slate-700"
+                    className="w-6 h-6 rounded-full border border-zinc-700 object-cover"
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center">
-                    <UserIcon className="w-4 h-4 text-slate-400" />
+                  <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center">
+                    <UserIcon size={12} weight="bold" className="text-zinc-400" />
                   </div>
                 )}
-                <span className="font-medium truncate max-w-[140px]">{user.displayName || user.email}</span>
+                <span className="hidden md:inline font-medium text-xs text-zinc-300 max-w-[120px] truncate">
+                  {user.displayName || user.email}
+                </span>
               </div>
               <button
                 onClick={signOutUser}
                 title="Sair da conta"
-                className="px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-lg transition-colors"
               >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sair</span>
+                <SignOut size={16} weight="bold" />
               </button>
             </div>
           ) : (
             <button
               onClick={signInWithGoogle}
-              className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm transition-colors flex items-center gap-2 whitespace-nowrap shrink-0"
+              className="px-3 py-1.5 text-xs font-medium text-zinc-200 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-lg transition-colors flex items-center gap-1.5"
             >
-              <LogIn className="w-4 h-4" />
-              <span>Login do Professor</span>
+              <SignIn size={14} weight="bold" />
+              <span>Entrar</span>
             </button>
           )}
         </div>
