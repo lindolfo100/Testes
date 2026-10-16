@@ -37,7 +37,7 @@ app.get('/api/network-info', (_req, res) => {
   });
 });
 
-import { parseEducationalTextToQuestions } from './src/lib/quizParser.js';
+import { parseEducationalTextToQuestions } from './src/lib/quizParser';
 
 // Lazy client helper: only instantiates GoogleGenAI when an API key is actually provided
 function getGeminiClient(): GoogleGenAI | null {

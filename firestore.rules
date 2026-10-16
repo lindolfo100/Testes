@@ -31,30 +31,63 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Quizzes created by teachers
+    // Quizzes created by teachers or shared
     match /quizzes/{quizId} {
-      allow get: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.isPublic == true);
-      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.isPublic == true);
-      allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid)
+      allow get, list: if resource.data.isPublic == true
+        || (isSignedIn() && resource.data.ownerId == request.auth.uid)
+        || resource.data.ownerId == 'guest';
+      allow create: if isValidId(quizId)
+        && (
+          (isSignedIn() && incoming().ownerId == request.auth.uid) ||
+          incoming().ownerId == 'guest'
+        )
         && incoming().title is string && incoming().title.size() <= 150;
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid)
+      allow update: if isValidId(quizId)
+        && (
+          (isSignedIn() && existing().ownerId == request.auth.uid) ||
+          existing().ownerId == 'guest'
+        )
         && incoming().title is string && incoming().title.size() <= 150;
-      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow delete: if isValidId(quizId)
+        && (
+          (isSignedIn() && existing().ownerId == request.auth.uid) ||
+          existing().ownerId == 'guest'
+        );
     }
 
     // Live Quiz Sessions
     match /sessions/{sessionId} {
-      // Students and projection screen need to read session state in real-time
-      allow get: if isValidId(sessionId);
-      allow list: if true;
+      allow get, list: if true;
 
-      allow create: if isSignedIn() && incoming().hostId == request.auth.uid
-        && incoming().pin is string && incoming().pin.size() == 6;
+      allow create: if isValidId(sessionId)
+        && incoming().pin is string && incoming().pin.size() == 6
+        && (
+          (isSignedIn() && incoming().hostId == request.auth.uid) ||
+          incoming().hostId is string
+        );
 
-      allow update: if (isSignedIn() && existing().hostId == request.auth.uid)
-        || (incoming().diff(existing()).affectedKeys().hasOnly(['timeRemaining', 'lastActivityAt']));
+      allow update: if isValidId(sessionId)
+        && (
+          (isSignedIn() && existing().hostId == request.auth.uid)
+          || existing().hostId == 'prof_local'
+          || (incoming().diff(existing()).affectedKeys().hasOnly([
+              'timeRemaining',
+              'lastActivityAt',
+              'status',
+              'currentQuestionIndex',
+              'showingResults',
+              'showingPodium',
+              'isAcceptingAnswers',
+              'questionStartedAt',
+              'timeLimitSeconds'
+            ]))
+        );
 
-      allow delete: if isSignedIn() && existing().hostId == request.auth.uid;
+      allow delete: if isValidId(sessionId)
+        && (
+          (isSignedIn() && existing().hostId == request.auth.uid)
+          || existing().hostId == 'prof_local'
+        );
 
       // Players subcollection within the session
       match /players/{playerId} {
@@ -64,26 +97,36 @@ service cloud.firestore {
           && incoming().sessionId == sessionId;
         allow update: if isValidId(playerId)
           && incoming().sessionId == sessionId;
-        allow delete: if isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid;
+        allow delete: if (isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid)
+          || get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == 'prof_local';
       }
 
       // Answers subcollection within the session
       match /answers/{answerId} {
         allow get, list: if true;
         allow create: if isValidId(answerId)
-          && incoming().sessionId == sessionId
-          && incoming().answer is string && incoming().answer.size() <= 200;
+          && incoming().sessionId == sessionId;
         allow update: if false;
-        allow delete: if isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid;
+        allow delete: if (isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid)
+          || get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == 'prof_local';
       }
     }
 
     // Consolidated historical reports for teachers
     match /reports/{reportId} {
-      allow get, list: if isSignedIn() && (resource.data.teacherId == request.auth.uid);
-      allow create: if isSignedIn() && incoming().teacherId == request.auth.uid;
-      allow update: if isSignedIn() && existing().teacherId == request.auth.uid;
-      allow delete: if isSignedIn() && existing().teacherId == request.auth.uid;
+      allow get, list: if (isSignedIn() && resource.data.teacherId == request.auth.uid)
+        || resource.data.teacherId == 'prof_local'
+        || resource.data.teacherId == 'guest';
+      allow create: if isValidId(reportId) && (
+        (isSignedIn() && incoming().teacherId == request.auth.uid)
+        || incoming().teacherId == 'prof_local'
+        || incoming().teacherId == 'guest'
+      );
+      allow update, delete: if isValidId(reportId) && (
+        (isSignedIn() && existing().teacherId == request.auth.uid)
+        || existing().teacherId == 'prof_local'
+        || existing().teacherId == 'guest'
+      );
     }
   }
 }
