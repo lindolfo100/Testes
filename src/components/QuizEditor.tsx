@@ -12,15 +12,12 @@ import {
   ArrowDown,
   CaretDown,
   Trophy,
-  ListNumbers,
-  ChatText,
   ArrowsLeftRight,
-  SortAscending,
   Image as ImageIcon,
   Video,
   Cloud,
-  ChartPieSlice,
   Article,
+  CopySimple,
 } from '@phosphor-icons/react';
 import { AiQuizGenerator } from './AiQuizGenerator';
 import { auth } from '../lib/firebase';
@@ -176,6 +173,35 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
       return;
     }
     setQuestions(questions.filter((_, i) => i !== index));
+  };
+
+  const moveQuestion = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= questions.length) return;
+    const updated = [...questions];
+    const [item] = updated.splice(index, 1);
+    updated.splice(targetIndex, 0, item);
+    setQuestions(updated);
+  };
+
+  const duplicateQuestion = (index: number) => {
+    const source = questions[index];
+    const clone: Question = {
+      ...source,
+      id: 'q_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      options: source.options ? [...source.options] : undefined,
+      acceptedAnswers: source.acceptedAnswers ? [...source.acceptedAnswers] : undefined,
+      itemsOrder: source.itemsOrder ? [...source.itemsOrder] : undefined,
+      pairs: source.pairs
+        ? source.pairs.map((p, i) => ({
+            ...p,
+            id: `p_${Date.now().toString(36)}_${i}`,
+          }))
+        : undefined,
+    };
+    const updated = [...questions];
+    updated.splice(index + 1, 0, clone);
+    setQuestions(updated);
   };
 
   const updateQuestionField = <K extends keyof Question>(index: number, field: K, value: Question[K]) => {
@@ -627,6 +653,36 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                             <option value={500}>500 pts</option>
                             <option value={0}>0 pts (Participação)</option>
                           </select>
+                        </div>
+
+                        {/* Reorder & Duplicate Actions */}
+                        <div className="flex items-center gap-0.5 bg-zinc-900 px-1 py-0.5 rounded-lg border border-zinc-800">
+                          <button
+                            type="button"
+                            disabled={qIdx === 0}
+                            onClick={() => moveQuestion(qIdx, 'up')}
+                            className="text-zinc-400 hover:text-zinc-100 disabled:opacity-30 p-1 rounded hover:bg-zinc-800 transition-colors"
+                            title="Mover questão para cima"
+                          >
+                            <ArrowUp size={13} weight="bold" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={qIdx === questions.length - 1}
+                            onClick={() => moveQuestion(qIdx, 'down')}
+                            className="text-zinc-400 hover:text-zinc-100 disabled:opacity-30 p-1 rounded hover:bg-zinc-800 transition-colors"
+                            title="Mover questão para baixo"
+                          >
+                            <ArrowDown size={13} weight="bold" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => duplicateQuestion(qIdx)}
+                            className="text-zinc-400 hover:text-zinc-100 p-1 rounded hover:bg-zinc-800 transition-colors"
+                            title="Duplicar questão"
+                          >
+                            <CopySimple size={13} weight="bold" />
+                          </button>
                         </div>
 
                         <button

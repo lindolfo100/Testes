@@ -11,7 +11,7 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.jpg', 'apple-touch-icon.png', 'valendo-icon.svg'],
+        includeAssets: ['apple-touch-icon.png', 'valendo-icon.svg'],
         manifest: {
           id: '/',
           name: 'Valendo! Quiz Interativo em Tempo Real',
@@ -66,6 +66,21 @@ export default defineConfig(() => {
     },
     build: {
       chunkSizeWarningLimit: 1200,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
+              return 'vendor-firebase';
+            }
+            if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('node_modules/@phosphor-icons')) {
+              return 'vendor-icons';
+            }
+          },
+        },
+      },
     },
   };
 });

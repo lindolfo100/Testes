@@ -62,12 +62,14 @@ export interface Session {
   hostName?: string;
   quizId: string;
   quizTitle: string;
+  questions?: Question[];
   status: SessionStatus;
   currentQuestionIndex: number;
   totalQuestions: number;
   isAcceptingAnswers: boolean;
   questionStartedAt?: number;
   timeLimitSeconds?: number;
+  rankingSnapshot?: { id: string; nickname: string; score: number }[];
   createdAt: string;
 }
 

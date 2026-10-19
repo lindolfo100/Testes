@@ -453,17 +453,17 @@ export const LiveCharts: React.FC<LiveChartsProps> = ({ question, answers, showC
     <div className="w-full max-w-4xl mx-auto space-y-4">
       {/* Visualização de Mídia (Imagem, Vídeo YouTube/MP4 ou Áudio) no Telão */}
       {question.mediaUrl && (
-        <div className="max-w-lg mx-auto rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-sm">
+        <div className="max-w-xl mx-auto illustration-frame rounded-2xl overflow-hidden bg-zinc-950/90 shadow-md">
           {question.mediaType === 'image' || question.type === 'image' ? (
             <img
               src={question.mediaUrl}
               alt="Estímulo visual da questão"
-              className="w-full max-h-60 object-cover"
+              className="w-full max-h-64 sm:max-h-72 object-contain mx-auto p-2"
             />
           ) : question.mediaType === 'audio' ? (
-            <div className="p-4 flex items-center gap-3 bg-zinc-900/60">
+            <div className="p-4 flex items-center gap-3 bg-zinc-900/70">
               <div className="w-10 h-10 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-                <SpeakerHigh size={20} weight="duotone" className="text-zinc-200" />
+                <SpeakerHigh size={20} weight="duotone" className="text-amber-400" />
               </div>
               <audio controls src={question.mediaUrl} className="w-full h-9" autoPlay={false} />
             </div>
@@ -478,7 +478,7 @@ export const LiveCharts: React.FC<LiveChartsProps> = ({ question, answers, showC
               />
             </div>
           ) : (
-            <video controls src={question.mediaUrl} className="w-full max-h-60 object-cover" />
+            <video controls src={question.mediaUrl} className="w-full max-h-64 object-contain mx-auto" />
           )}
         </div>
       )}

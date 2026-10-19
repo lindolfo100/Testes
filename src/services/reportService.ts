@@ -127,7 +127,7 @@ export function exportReportToCSV(report: QuizReport) {
   });
 
   const lines: string[] = [
-    `Relatório de Turma - QuizClass Live / Valendo!`,
+    `Relatório de Turma - Valendo!`,
     `Questionário,"${report.quizTitle}"`,
     `Disciplina,"${report.subject || 'Geral'}"`,
     `Data da Sessão,"${dateFormatted}"`,

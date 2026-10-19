@@ -8,13 +8,17 @@ import {
   updateSessionState,
   joinSessionAsPlayer,
   submitAnswer,
+  restartLiveSession,
 } from '../services/quizService';
 import { saveQuizReport } from '../services/reportService';
 import { soundEffects } from '../lib/soundEffects';
 import { LiveCharts } from '../components/LiveCharts';
 import { DataCloud } from '../components/DataCloud';
 import { Podium } from '../components/Podium';
-import { WaitingRoomIllustration } from '../components/BrandIllustrations';
+import {
+  WaitingRoomIllustration,
+  LeaderboardBadgeIllustration,
+} from '../components/BrandIllustrations';
 import { QUESTION_TYPES_META } from '../lib/quizHelpers';
 import {
   Users,
@@ -35,6 +39,8 @@ import {
   X,
   SpeakerHigh,
   SpeakerSlash,
+  ArrowCounterClockwise,
+  Trophy,
 } from '@phosphor-icons/react';
 
 interface TelaoViewProps {
@@ -64,6 +70,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(() => soundEffects.getMuted());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const closingRef = useRef(false);
+  const reportSavedRef = useRef(false);
 
   // Subscribe to Session
   useEffect(() => {
@@ -82,9 +89,10 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
   }, [sessionId]);
 
   const currentQuiz = quizzes.find((q) => q.id === session?.quizId) || quizzes[0];
+  const sessionQuestions = session?.questions?.length ? session.questions : currentQuiz?.questions || [];
   const currentQuestionIndex = session?.currentQuestionIndex ?? 0;
-  const currentQuestion = currentQuiz?.questions[currentQuestionIndex];
-  const totalQuestions = currentQuiz?.questions?.length || 1;
+  const currentQuestion = sessionQuestions[currentQuestionIndex];
+  const totalQuestions = sessionQuestions.length || 1;
 
   // Subscribe to Answers for current question
   useEffect(() => {
@@ -159,15 +167,27 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
   };
 
   const buildAndSaveReport = async (): Promise<QuizReport | null> => {
-    if (!session || !currentQuiz) return null;
+    if (!session) return null;
+    if (reportSavedRef.current && consolidatedReport) return consolidatedReport;
+    reportSavedRef.current = true;
+
     try {
       const sorted = [...players].sort((a, b) => b.score - a.score);
-      const totalAnswersCount = allAnswersHistory.length;
-      const correctAnswersCount = allAnswersHistory.filter((a) => a.isCorrect).length;
-      const avgAccuracy =
-        totalAnswersCount > 0 ? Math.round((correctAnswersCount / totalAnswersCount) * 100) : 0;
 
-      const questionsSummary: QuestionReportSummary[] = currentQuiz.questions.map((q, qIdx) => {
+      const gradedAnswers = allAnswersHistory.filter((a) => {
+        const q = sessionQuestions[a.questionIndex];
+        return q && !QUESTION_TYPES_META[q.type]?.isOpinion;
+      });
+      const totalGradedCount = gradedAnswers.length;
+      const correctGradedCount = gradedAnswers.filter((a) => a.isCorrect).length;
+      const avgAccuracy =
+        totalGradedCount > 0
+          ? Math.round((correctGradedCount / totalGradedCount) * 100)
+          : allAnswersHistory.length > 0
+          ? 100
+          : 0;
+
+      const questionsSummary: QuestionReportSummary[] = sessionQuestions.map((q, qIdx) => {
         const qAnswers = allAnswersHistory.filter((a) => a.questionIndex === qIdx);
         const qCorrect = qAnswers.filter((a) => a.isCorrect).length;
         const accuracyPercentage =
@@ -185,10 +205,10 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       const rep = await saveQuizReport({
         teacherId: session.hostId || 'prof_local',
         sessionId: session.id,
-        quizId: currentQuiz.id,
-        quizTitle: currentQuiz.title,
-        subject: currentQuiz.subject,
-        totalQuestions: currentQuiz.questions.length,
+        quizId: session.quizId || currentQuiz?.id || 'custom_quiz',
+        quizTitle: session.quizTitle || currentQuiz?.title || 'Quiz',
+        subject: currentQuiz?.subject || 'Geral',
+        totalQuestions: sessionQuestions.length,
         totalPlayers: players.length,
         averageAccuracy: avgAccuracy,
         top3: sorted.slice(0, 3).map((p) => ({ nickname: p.nickname, score: p.score })),
@@ -203,6 +223,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       setConsolidatedReport(rep);
       return rep;
     } catch (err) {
+      reportSavedRef.current = false;
       console.warn('Could not compile report:', err);
       return null;
     }
@@ -217,19 +238,26 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       isAcceptingAnswers: true,
       timeLimitSeconds: currentQuestion.timeLimit,
       questionStartedAt: Date.now(),
+      rankingSnapshot: [],
     });
   };
+
+  const buildRankingSnapshot = () =>
+    [...players]
+      .sort((a, b) => b.score - a.score)
+      .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }));
 
   const handleShowLeaderboard = async () => {
     await updateSessionState(sessionId, {
       status: 'leaderboard',
+      rankingSnapshot: buildRankingSnapshot(),
     });
   };
 
   const handleNextStep = async () => {
     const nextIdx = currentQuestionIndex + 1;
     if (nextIdx < totalQuestions) {
-      const nextQ = currentQuiz.questions[nextIdx];
+      const nextQ = sessionQuestions[nextIdx];
       soundEffects.playTick();
       await updateSessionState(sessionId, {
         status: 'question',
@@ -237,21 +265,33 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
         isAcceptingAnswers: true,
         timeLimitSeconds: nextQ.timeLimit,
         questionStartedAt: Date.now(),
+        rankingSnapshot: [],
       });
     } else {
       await buildAndSaveReport();
       await updateSessionState(sessionId, {
         status: 'podium',
         isAcceptingAnswers: false,
+        rankingSnapshot: buildRankingSnapshot(),
       });
     }
   };
 
-  const handleRestart = async () => {
+  const handleRestart = async (startImmediately = false) => {
+    reportSavedRef.current = false;
+    setConsolidatedReport(null);
+    setAllAnswersHistory([]);
+    setAnswers([]);
+    const firstTimeLimit = sessionQuestions[0]?.timeLimit || 20;
+    await restartLiveSession(sessionId, startImmediately, firstTimeLimit);
+  };
+
+  const handleJumpToPodium = async () => {
+    await buildAndSaveReport();
     await updateSessionState(sessionId, {
-      status: 'lobby',
-      currentQuestionIndex: 0,
+      status: 'podium',
       isAcceptingAnswers: false,
+      rankingSnapshot: buildRankingSnapshot(),
     });
   };
 
@@ -813,7 +853,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* Audio Toggle */}
             <button
               onClick={handleToggleSound}
@@ -835,6 +875,36 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
               <ArrowsOut size={14} weight="bold" />
             </button>
 
+            <button
+              type="button"
+              onClick={() => handleRestart(false)}
+              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Recomeçar quiz do início (mantendo os alunos conectados)"
+            >
+              <ArrowCounterClockwise size={13} weight="bold" />
+              <span className="hidden md:inline">Recomeçar</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleJumpToPodium}
+              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Finalizar perguntas e ir direto para o Pódio Final"
+            >
+              <Trophy size={13} weight="bold" />
+              <span className="hidden md:inline">Pódio</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleEndSessionAndExit}
+              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Encerrar apresentação e voltar ao painel"
+            >
+              <SignOut size={13} weight="bold" />
+              <span className="hidden sm:inline">Encerrar</span>
+            </button>
+
             <div className="flex items-center gap-1.5 bg-zinc-900/70 px-3 py-1 rounded-lg border border-zinc-800 text-xs font-mono text-zinc-400">
               <Users size={14} weight="regular" />
               <span className="text-zinc-100 font-bold tabular-nums">
@@ -850,7 +920,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
                 title="Simular respostas dos alunos de teste"
               >
                 <Robot size={14} weight="bold" />
-                <span>Simular Votos</span>
+                <span className="hidden lg:inline">Simular Votos</span>
               </button>
             )}
 
@@ -969,7 +1039,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <button
               onClick={handleToggleSound}
               className={`p-1.5 rounded-lg border transition-colors ${
@@ -980,6 +1050,36 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
               title={isMuted ? 'Ativar sons' : 'Silenciar sons'}
             >
               {isMuted ? <SpeakerSlash size={14} weight="bold" /> : <SpeakerHigh size={14} weight="bold" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleRestart(false)}
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Recomeçar quiz do início (mantendo os alunos conectados)"
+            >
+              <ArrowCounterClockwise size={13} weight="bold" />
+              <span className="hidden md:inline">Recomeçar</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleJumpToPodium}
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Finalizar perguntas e ir direto para o Pódio Final"
+            >
+              <Trophy size={13} weight="bold" />
+              <span className="hidden md:inline">Pódio</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleEndSessionAndExit}
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Encerrar apresentação e voltar ao painel"
+            >
+              <SignOut size={13} weight="bold" />
+              <span className="hidden sm:inline">Encerrar</span>
             </button>
 
             <button
@@ -1042,25 +1142,52 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
 
     return (
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-6 min-h-[85vh] flex flex-col justify-between">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-widest font-semibold block">
-              Parcial da Rodada · {currentQuestionIndex + 1}/{totalQuestions}
-            </span>
-            <h2 className="text-xl sm:text-2xl font-bold text-zinc-100">Classificação da Turma</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-3.5">
+            <LeaderboardBadgeIllustration className="w-16 h-16 shrink-0" />
+            <div className="space-y-0.5">
+              <span className="text-xs font-mono text-amber-400 uppercase tracking-widest font-semibold block">
+                Parcial da Rodada · {currentQuestionIndex + 1}/{totalQuestions}
+              </span>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-zinc-100 font-display">
+                Classificação da Turma
+              </h2>
+            </div>
           </div>
 
-          <button
-            onClick={handleToggleSound}
-            className={`p-1.5 rounded-lg border transition-colors ${
-              isMuted
-                ? 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-                : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-zinc-850'
-            }`}
-            title={isMuted ? 'Ativar sons' : 'Silenciar sons'}
-          >
-            {isMuted ? <SpeakerSlash size={14} weight="bold" /> : <SpeakerHigh size={14} weight="bold" />}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleToggleSound}
+              className={`p-1.5 rounded-lg border transition-colors ${
+                isMuted
+                  ? 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                  : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-zinc-850'
+              }`}
+              title={isMuted ? 'Ativar sons' : 'Silenciar sons'}
+            >
+              {isMuted ? <SpeakerSlash size={14} weight="bold" /> : <SpeakerHigh size={14} weight="bold" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleRestart(false)}
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Recomeçar quiz do início (mantendo os alunos conectados)"
+            >
+              <ArrowCounterClockwise size={13} weight="bold" />
+              <span className="hidden sm:inline">Recomeçar</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleEndSessionAndExit}
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 text-xs font-medium transition-colors flex items-center gap-1"
+              title="Encerrar apresentação e voltar ao painel"
+            >
+              <SignOut size={13} weight="bold" />
+              <span className="hidden sm:inline">Encerrar</span>
+            </button>
+          </div>
         </div>
 
         {/* Clean Ranking List */}

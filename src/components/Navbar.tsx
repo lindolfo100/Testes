@@ -9,6 +9,8 @@ import {
   SignIn,
   SignOut,
   User as UserIcon,
+  X,
+  ArrowCounterClockwise,
 } from '@phosphor-icons/react';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -18,79 +20,112 @@ interface NavbarProps {
   currentView: AppView;
   onNavigate: (view: AppView) => void;
   activeSessionPin?: string | null;
+  onCloseActiveSession?: () => void;
+  onRestartActiveSession?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, activeSessionPin }) => {
+export const Navbar: React.FC<NavbarProps> = ({
+  currentView,
+  onNavigate,
+  activeSessionPin,
+  onCloseActiveSession,
+  onRestartActiveSession,
+}) => {
   const { user, signInWithGoogle, signOutUser } = useAuth();
 
   return (
     <header className="border-b border-zinc-800/60 bg-zinc-950/85 backdrop-blur-xl sticky top-0 z-50">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-3">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-15 flex items-center justify-between gap-2 sm:gap-3">
         {/* Playful Brand Logo */}
         <button
           type="button"
           onClick={() => onNavigate('welcome')}
-          className="text-left focus:outline-none"
+          className="text-left focus:outline-none shrink-0"
           title="Voltar à tela de boas-vindas"
         >
           <ValendoLogo size="md" />
         </button>
 
         {/* Minimal Navigation Pills */}
-        <nav className="flex items-center p-1 bg-zinc-900/70 rounded-xl border border-zinc-800/70 text-xs">
+        <nav className="flex items-center p-1 bg-zinc-900/80 rounded-xl border border-zinc-800/80 text-xs sm:text-sm overflow-x-auto">
           <button
             type="button"
             onClick={() => onNavigate('welcome')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold transition-all ${
               currentView === 'welcome'
                 ? 'bg-zinc-800 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
+                : 'text-zinc-300 hover:text-white'
             }`}
           >
-            <House size={15} weight={currentView === 'welcome' ? 'fill' : 'regular'} />
-            <span className="hidden sm:inline">Início</span>
+            <House size={16} weight={currentView === 'welcome' ? 'fill' : 'regular'} />
+            <span className="hidden xs:inline sm:inline">Início</span>
           </button>
 
           <button
             type="button"
             onClick={() => onNavigate('dashboard')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold transition-all ${
               currentView === 'dashboard'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/35 shadow-sm'
+                : 'text-zinc-300 hover:text-white'
             }`}
           >
-            <ChalkboardSimple size={15} weight={currentView === 'dashboard' ? 'bold' : 'regular'} />
-            <span className="hidden sm:inline">Professor</span>
+            <ChalkboardSimple size={16} weight={currentView === 'dashboard' ? 'bold' : 'regular'} />
+            <span>Prof</span>
+            <span className="hidden sm:inline -ml-1.5">essor</span>
           </button>
 
           <button
             type="button"
             onClick={() => onNavigate('student')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold transition-all ${
               currentView === 'student'
-                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/35 shadow-sm'
+                : 'text-zinc-300 hover:text-white'
             }`}
           >
-            <DeviceMobile size={15} weight={currentView === 'student' ? 'bold' : 'regular'} />
-            <span className="hidden sm:inline">Aluno</span>
+            <DeviceMobile size={16} weight={currentView === 'student' ? 'bold' : 'regular'} />
+            <span>Aluno</span>
           </button>
 
           {activeSessionPin && (
-            <button
-              type="button"
-              onClick={() => onNavigate('telao')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all ml-0.5 ${
-                currentView === 'telao'
-                  ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/40'
-                  : 'text-emerald-400 hover:text-emerald-300'
-              }`}
-              title="Retornar ao Telão ativo"
-            >
-              <Monitor size={15} weight={currentView === 'telao' ? 'bold' : 'regular'} />
-              <span className="font-mono font-bold">{activeSessionPin}</span>
-            </button>
+            <div className="flex items-center ml-1 pl-1 border-l border-zinc-800 gap-0.5">
+              <button
+                type="button"
+                onClick={() => onNavigate('telao')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-all ${
+                  currentView === 'telao'
+                    ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/40'
+                    : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40'
+                }`}
+                title="Abrir Telão ativo"
+              >
+                <Monitor size={15} weight={currentView === 'telao' ? 'bold' : 'regular'} />
+                <span className="font-mono font-bold tabular-nums">{activeSessionPin}</span>
+              </button>
+
+              {onRestartActiveSession && (
+                <button
+                  type="button"
+                  onClick={onRestartActiveSession}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-300 hover:bg-zinc-800/80 transition-colors hidden sm:inline-flex"
+                  title="Recomeçar quiz aberto do início"
+                >
+                  <ArrowCounterClockwise size={14} weight="bold" />
+                </button>
+              )}
+
+              {onCloseActiveSession && (
+                <button
+                  type="button"
+                  onClick={onCloseActiveSession}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors"
+                  title="Encerrar sala aberta imediatamente"
+                >
+                  <X size={14} weight="bold" />
+                </button>
+              )}
+            </div>
           )}
         </nav>
 

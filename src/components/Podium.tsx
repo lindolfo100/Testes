@@ -3,6 +3,8 @@ import confetti from 'canvas-confetti';
 import { Player, QuizReport } from '../types/quiz';
 import { exportReportToCSV } from '../services/reportService';
 import { soundEffects } from '../lib/soundEffects';
+import { ReportDiagnosticsModal } from './ReportDiagnosticsModal';
+import { PodiumCelebrationIllustration } from './BrandIllustrations';
 import {
   Trophy,
   Medal,
@@ -12,8 +14,8 @@ import {
   DownloadSimple,
   Crown,
   ChartBar,
-  X,
-  CheckCircle,
+  Play,
+  SignOut,
 } from '@phosphor-icons/react';
 
 interface PodiumProps {
@@ -21,7 +23,7 @@ interface PodiumProps {
   quizTitle: string;
   totalQuestions: number;
   report?: QuizReport | null;
-  onRestart: () => void;
+  onRestart: (startImmediately?: boolean) => void;
   onExit: () => void;
 }
 
@@ -36,7 +38,6 @@ export const Podium: React.FC<PodiumProps> = ({
   const [showBreakdown, setShowBreakdown] = useState(false);
 
   useEffect(() => {
-    // Play celebratory Web Audio fanfare
     soundEffects.playFanfare();
 
     const duration = 2.8 * 1000;
@@ -72,32 +73,36 @@ export const Podium: React.FC<PodiumProps> = ({
   const rest = sortedPlayers.slice(3);
 
   const handleExportCSV = () => {
-    if (report) {
-      exportReportToCSV(report);
-      return;
-    }
-    const headers = ['Posição,Nome do Aluno,Pontuação Total,Acertos Consecutivos (Streak)\n'];
-    const rows = sortedPlayers.map(
-      (p, i) => `${i + 1},"${p.nickname}",${p.score},${p.streak}\n`
-    );
-    const blob = new Blob([headers.concat(rows).join('')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `resultado_${quizTitle.replace(/\s+/g, '_')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const targetReport: QuizReport = report || {
+      id: 'sessao_atual',
+      teacherId: 'guest',
+      sessionId: 'sessao_atual',
+      quizId: 'quiz_atual',
+      quizTitle,
+      totalQuestions,
+      totalPlayers: players.length,
+      averageAccuracy: 0,
+      top3: sortedPlayers.slice(0, 3).map((p) => ({ nickname: p.nickname, score: p.score })),
+      playersRanking: sortedPlayers.map((p) => ({
+        nickname: p.nickname,
+        score: p.score,
+        streak: p.streak,
+      })),
+      questionsSummary: [],
+      completedAt: new Date().toISOString(),
+    };
+    exportReportToCSV(targetReport);
   };
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6 py-6 px-4">
-      {/* Title */}
-      <div className="text-center space-y-1">
-        <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-widest block font-semibold">
+      {/* Title with Celebration Illustration */}
+      <div className="text-center space-y-1.5">
+        <PodiumCelebrationIllustration className="w-28 h-24 mx-auto" />
+        <span className="text-xs font-mono text-amber-400 uppercase tracking-widest block font-semibold">
           Pódio Final da Turma
         </span>
-        <h2 className="text-xl sm:text-2xl font-bold text-zinc-100">{quizTitle}</h2>
+        <h2 className="text-2xl sm:text-3xl font-extrabold text-zinc-100 font-display">{quizTitle}</h2>
         <div className="flex items-center justify-center gap-3 text-xs text-zinc-400 font-mono">
           <span>{totalQuestions} questões</span>
           <span>·</span>
@@ -105,7 +110,9 @@ export const Podium: React.FC<PodiumProps> = ({
           {report && (
             <>
               <span>·</span>
-              <span className="text-emerald-400 font-semibold">{report.averageAccuracy}% acerto geral</span>
+              <span className="text-emerald-400 font-semibold">
+                {report.averageAccuracy}% acerto geral
+              </span>
             </>
           )}
         </div>
@@ -187,7 +194,9 @@ export const Podium: React.FC<PodiumProps> = ({
                     <Flame size={12} weight="fill" /> {p.streak}x
                   </span>
                 )}
-                <span className="font-mono text-zinc-300 font-semibold tabular-nums">{p.score} pts</span>
+                <span className="font-mono text-zinc-300 font-semibold tabular-nums">
+                  {p.score} pts
+                </span>
               </div>
             </div>
           ))}
@@ -200,113 +209,51 @@ export const Podium: React.FC<PodiumProps> = ({
           <button
             type="button"
             onClick={() => setShowBreakdown(true)}
-            className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors flex items-center gap-1.5"
+            className="px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors flex items-center gap-1.5"
           >
             <ChartBar size={14} weight="bold" />
-            <span>Ver Diagnóstico da Turma</span>
+            <span>Diagnóstico da Turma</span>
           </button>
         )}
 
         <button
           onClick={handleExportCSV}
-          className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-xs font-medium border border-zinc-800 transition-colors flex items-center gap-1.5"
+          className="px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-xs font-medium border border-zinc-800 transition-colors flex items-center gap-1.5"
           title="Baixar planilha CSV com o resultado de todos os alunos"
         >
           <DownloadSimple size={14} weight="bold" />
-          <span>Exportar Relatório CSV</span>
+          <span>Exportar CSV</span>
         </button>
 
         <button
-          onClick={onRestart}
-          className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5"
+          onClick={() => onRestart(true)}
+          className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-extrabold font-display shadow-sm transition-colors flex items-center gap-1.5"
+          title="Zerar pontos e começar a 1ª questão agora com a mesma turma conectada"
+        >
+          <Play size={14} weight="fill" />
+          <span>Jogar Novamente</span>
+        </button>
+
+        <button
+          onClick={() => onRestart(false)}
+          className="px-3.5 py-2.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5"
+          title="Voltar para a tela de espera (Lobby) mantendo os alunos conectados"
         >
           <ArrowCounterClockwise size={14} weight="bold" />
-          <span>Reiniciar Sala</span>
+          <span>Voltar ao Lobby</span>
         </button>
 
         <button
           onClick={onExit}
-          className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-400 hover:text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors"
+          className="px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 text-zinc-300 hover:text-rose-300 text-xs font-medium border border-zinc-800 hover:border-rose-500/30 transition-colors flex items-center gap-1.5"
         >
-          Concluir e Sair
+          <SignOut size={14} weight="bold" />
+          <span>Encerrar Sala</span>
         </button>
       </div>
 
-      {/* Modal: Detailed Question Performance Breakdown */}
       {showBreakdown && report && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl">
-            <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-zinc-100 text-sm">Diagnóstico da Turma por Questão</h3>
-                <span className="text-[11px] text-zinc-400 font-mono">
-                  Média de Acertos: {report.averageAccuracy}% · {report.totalPlayers} Alunos
-                </span>
-              </div>
-              <button
-                onClick={() => setShowBreakdown(false)}
-                className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
-              >
-                <X size={16} weight="bold" />
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto space-y-3">
-              {report.questionsSummary.map((q) => (
-                <div
-                  key={q.questionIndex}
-                  className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800/80 space-y-2 text-xs"
-                >
-                  <div className="flex items-center justify-between text-zinc-400 text-[11px]">
-                    <span className="font-mono font-bold text-zinc-300">
-                      Questão #{q.questionIndex + 1}
-                    </span>
-                    <span
-                      className={`font-mono font-bold px-2 py-0.5 rounded text-[10px] ${
-                        q.accuracyPercentage >= 70
-                          ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/30'
-                          : q.accuracyPercentage >= 40
-                          ? 'bg-amber-950/60 text-amber-400 border border-amber-500/30'
-                          : 'bg-rose-950/60 text-rose-400 border border-rose-500/30'
-                      }`}
-                    >
-                      {q.accuracyPercentage}% de acerto
-                    </span>
-                  </div>
-
-                  <p className="text-zinc-100 font-medium leading-snug">{q.questionText}</p>
-
-                  <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-400 pt-1">
-                    <span className="flex items-center gap-1 text-emerald-400">
-                      <CheckCircle size={13} weight="fill" />
-                      {q.correctAnswers} acertos
-                    </span>
-                    <span>·</span>
-                    <span>{q.totalAnswers} respostas computadas</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="px-5 py-3 border-t border-zinc-800 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                className="text-xs text-zinc-300 hover:text-white flex items-center gap-1.5"
-              >
-                <DownloadSimple size={13} weight="bold" />
-                <span>Exportar CSV</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowBreakdown(false)}
-                className="px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold"
-              >
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
+        <ReportDiagnosticsModal report={report} onClose={() => setShowBreakdown(false)} />
       )}
     </div>
   );
