@@ -29,6 +29,7 @@ export interface Question {
   // Campos complementares para os novos formatos:
   acceptedAnswers?: string[]; // Para 3. Resposta curta (ex: ['fotossíntese', 'fotossintese'])
   pairs?: MatchingPair[];     // Para 4. Associação de pares
+  matchingOptions?: string[]; // Opções embaralhadas do lado direito para o documento público da sessão
   itemsOrder?: string[];      // Para 5. Ordenação (sequência correta dos itens)
   mediaUrl?: string;          // Para 6. Imagem e 7. Vídeo/Áudio
   mediaType?: 'image' | 'video' | 'audio';
@@ -69,16 +70,21 @@ export interface Session {
   isAcceptingAnswers: boolean;
   questionStartedAt?: number;
   timeLimitSeconds?: number;
-  rankingSnapshot?: { id: string; nickname: string; score: number }[];
+  revealedQuestion?: Question | null;
+  rankingSnapshot?: { id: string; nickname: string; score: number; streak?: number }[];
   createdAt: string;
+  expiresAt?: string;
+  expiresAtTimestamp?: any;
 }
 
 export interface Player {
   id: string;
   sessionId: string;
+  uid?: string;
   nickname: string;
   score: number;
   streak: number;
+  lastAnswerId?: string;
   joinedAt: string;
 }
 
@@ -92,6 +98,7 @@ export interface Answer {
   isCorrect: boolean;
   pointsAwarded: number;
   timeSpentMs: number;
+  gradedByHost?: boolean;
   submittedAt: string;
 }
 

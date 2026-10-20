@@ -7,4 +7,7 @@ export const STORAGE_KEYS = {
   SAVED_NICKNAME: 'quiz_saved_nickname',
   PLAYER_ANSWERED_KEY: 'quiz_player_answered_key',
   PLAYER_SELECTED_ANSWER: 'quiz_player_selected_answer',
+  PWA_BANNER_DISMISSED: 'valendo_pwa_banner_dismissed',
+  // Chave Gemini pessoal do professor: fica somente neste aparelho
+  USER_GEMINI_API_KEY: 'valendo_gemini_api_key',
 } as const;

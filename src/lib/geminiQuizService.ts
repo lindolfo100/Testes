@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { parseEducationalTextToQuestions, ParsedQuizData } from './quizParser';
 import { QuestionType } from '../types/quiz';
+import defaultFirebaseConfig from '../../firebase-applet-config.json';
 
 export type AiGenerationFormat =
   | 'mixed'
@@ -18,6 +19,14 @@ export interface GenerateQuizInput {
   questionType?: AiGenerationFormat;
   count?: number;
   defaultTimeLimit?: number;
+  apiKey?: string;
+}
+
+export interface GenerateQuizRequestMeta {
+  authHeader?: string;
+  clientId?: string;
+  ip?: string;
+  apiKey?: string;
 }
 
 export interface GenerateQuizResult {
@@ -26,8 +35,74 @@ export interface GenerateQuizResult {
   error?: string;
 }
 
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+// In-memory sliding window rate limiter per client/IP
+const rateLimitStore = new Map<string, number[]>();
+
+function checkAiRateLimit(key: string, isAuthenticated: boolean): { allowed: boolean; retryAfterSec?: number } {
+  const now = Date.now();
+  const oneHourAgo = now - 60 * 60 * 1000;
+  const oneMinuteAgo = now - 60 * 1000;
+
+  // Periodic cleanup of stale entries
+  if (rateLimitStore.size > 1000) {
+    for (const [k, tsList] of rateLimitStore.entries()) {
+      const recent = tsList.filter((t) => t > oneHourAgo);
+      if (recent.length === 0) rateLimitStore.delete(k);
+      else rateLimitStore.set(k, recent);
+    }
+  }
+
+  const timestamps = (rateLimitStore.get(key) || []).filter((t) => t > oneHourAgo);
+  const lastMinuteCount = timestamps.filter((t) => t > oneMinuteAgo).length;
+
+  const maxPerMinute = isAuthenticated ? 6 : 3;
+  const maxPerHour = isAuthenticated ? 30 : 12;
+
+  if (lastMinuteCount >= maxPerMinute) {
+    return { allowed: false, retryAfterSec: 60 };
+  }
+  if (timestamps.length >= maxPerHour) {
+    return { allowed: false, retryAfterSec: 3600 };
+  }
+
+  timestamps.push(now);
+  rateLimitStore.set(key, timestamps);
+  return { allowed: true };
+}
+
+/**
+ * Verifies a Firebase Auth ID Token on the server using Google Identity Toolkit REST API.
+ * Returns the verified user UID (`localId`) if valid, or null otherwise.
+ */
+async function verifyFirebaseIdToken(authHeader?: string): Promise<string | null> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const idToken = authHeader.slice(7).trim();
+  if (!idToken || idToken.length < 40) return null;
+
+  const firebaseApiKey =
+    process.env.VITE_FIREBASE_API_KEY || defaultFirebaseConfig.apiKey;
+  if (!firebaseApiKey) return null;
+
+  try {
+    const resp = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseApiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      }
+    );
+    if (!resp.ok) return null;
+    const data: any = await resp.json();
+    const uid = data?.users?.[0]?.localId;
+    return typeof uid === 'string' && uid.length > 0 ? uid : null;
+  } catch {
+    return null;
+  }
+}
+
+function getGeminiClient(customApiKey?: string): GoogleGenAI | null {
+  const apiKey = (customApiKey || process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     return null;
   }
@@ -63,20 +138,35 @@ function getFormatPromptInstruction(questionType: AiGenerationFormat): string {
   }
 }
 
-export async function generateOrParseQuiz(input: GenerateQuizInput): Promise<GenerateQuizResult> {
+export async function generateOrParseQuiz(
+  input: GenerateQuizInput,
+  meta?: GenerateQuizRequestMeta
+): Promise<GenerateQuizResult> {
   const {
     mode,
     text,
     questionType = 'mixed',
-    count = 5,
-    defaultTimeLimit = 20,
+    count: rawCount = 5,
+    defaultTimeLimit: rawTimeLimit = 20,
   } = input;
 
   if (!text || typeof text !== 'string' || !text.trim()) {
     return { status: 400, error: 'O texto ou tema deve ser fornecido.' };
   }
 
-  const ai = getGeminiClient();
+  if (text.length > 15000) {
+    return {
+      status: 400,
+      error: 'O texto excede o limite máximo de 15.000 caracteres. Reduza o trecho e tente novamente.',
+    };
+  }
+
+  const count = Math.min(15, Math.max(1, Number(rawCount) || 5));
+  const defaultTimeLimit = Math.min(120, Math.max(5, Number(rawTimeLimit) || 20));
+
+  const customApiKey = (meta?.apiKey || input.apiKey || '').trim();
+  const isCustomKey = Boolean(customApiKey && customApiKey.length >= 10);
+  const ai = getGeminiClient(customApiKey);
 
   if (!ai) {
     if (mode === 'paste') {
@@ -86,8 +176,29 @@ export async function generateOrParseQuiz(input: GenerateQuizInput): Promise<Gen
     return {
       status: 400,
       error:
-        'Para gerar questionários automáticos por tema com a IA Gemini, configure a variável GEMINI_API_KEY no ambiente. Se preferir, use a aba "Colar Questões" que funciona 100% offline!',
+        'Nenhuma chave do Gemini foi fornecida. Insira sua chave pessoal do Google Gemini (grátis no Google AI Studio) nas configurações do assistente ou use a aba "Colar Questões" que funciona 100% offline.',
     };
+  }
+
+  // Se o professor estiver usando a chave do servidor, aplica rate limit e verificação
+  if (!isCustomKey) {
+    const verifiedUid = await verifyFirebaseIdToken(meta?.authHeader);
+    if (process.env.REQUIRE_AUTH_FOR_AI === 'true' && !verifiedUid) {
+      return {
+        status: 401,
+        error: 'Faça login com sua conta de professor para usar a cota compartilhada ou insira sua própria chave Gemini.',
+      };
+    }
+
+    const rateKey = verifiedUid || meta?.ip || meta?.clientId || 'anonymous';
+    const rateCheck = checkAiRateLimit(rateKey, Boolean(verifiedUid));
+    if (!rateCheck.allowed) {
+      return {
+        status: 429,
+        error:
+          'Limite de uso da IA do servidor atingido. Aguarde cerca de 1 minuto ou insira sua chave própria do Gemini para ter seu limite exclusivo.',
+      };
+    }
   }
 
   const formatDescription = getFormatPromptInstruction(questionType);
@@ -197,10 +308,34 @@ Siga rigorosamente:
       const fallback = parseEducationalTextToQuestions(text, questionType as any, defaultTimeLimit);
       return { status: 200, data: fallback };
     }
+    const errStr = String(lastError?.message || '');
+    const isInvalidKey =
+      errStr.includes('API key not valid') ||
+      errStr.includes('API_KEY_INVALID') ||
+      errStr.includes('invalid api key');
+    if (isInvalidKey) {
+      return {
+        status: 400,
+        error: 'A chave da API Gemini informada é inválida. Verifique se copiou a chave corretamente no Google AI Studio.',
+      };
+    }
+
+    const isQuota =
+      lastError?.status === 429 ||
+      errStr.includes('RESOURCE_EXHAUSTED') ||
+      errStr.includes('quota') ||
+      errStr.includes('rate limit');
+    if (isQuota) {
+      return {
+        status: 429,
+        error: 'Limite da sua chave Gemini atingido no Google AI Studio. Aguarde alguns instantes ou verifique sua cota.',
+      };
+    }
+
     const is503 =
       lastError?.status === 503 ||
-      String(lastError?.message).includes('high demand') ||
-      String(lastError?.message).includes('503');
+      errStr.includes('high demand') ||
+      errStr.includes('503');
     const errorMessage = is503
       ? 'A IA Gemini está temporariamente com alta demanda. Aguarde alguns segundos e tente novamente.'
       : lastError?.message || 'Falha ao processar perguntas com a IA. Tente novamente em instantes.';

@@ -6,6 +6,10 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidDeviceId(id) {
+      return id is string && id.size() == 28 && id.matches('^dev_[a-f0-9]{24}$');
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -16,6 +20,18 @@ service cloud.firestore {
 
     function isSignedIn() {
       return request.auth != null;
+    }
+
+    // Matches either the authenticated Firebase user (Google or Anonymous Auth)
+    // or a valid 24-hex per-device fallback ID when Anonymous Auth is not enabled in Console.
+    function isOwner(ownerId) {
+      return (isSignedIn() && ownerId == request.auth.uid)
+        || (!isSignedIn() && isValidDeviceId(ownerId));
+    }
+
+    function isSessionHost(sessionId) {
+      let sessionData = get(/databases/$(database)/documents/sessions/$(sessionId)).data;
+      return isOwner(sessionData.hostId);
     }
 
     // Default deny catch-all
@@ -31,108 +47,96 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Quizzes created by teachers or shared
+    // Quizzes created by teachers or shared publicly
     match /quizzes/{quizId} {
-      allow get: if true;
-      allow list: if resource.data.isPublic == true
-        || (isSignedIn() && resource.data.ownerId == request.auth.uid)
-        || resource.data.ownerId == 'guest';
+      allow get: if resource.data.isPublic == true || isOwner(resource.data.ownerId);
+      allow list: if resource.data.isPublic == true || isOwner(resource.data.ownerId);
       allow create: if isValidId(quizId)
-        && (
-          (isSignedIn() && incoming().ownerId == request.auth.uid) ||
-          incoming().ownerId == 'guest'
-        )
+        && isOwner(incoming().ownerId)
         && incoming().title is string && incoming().title.size() <= 150;
       allow update: if isValidId(quizId)
-        && (
-          (isSignedIn() && existing().ownerId == request.auth.uid) ||
-          existing().ownerId == 'guest'
-        )
+        && isOwner(existing().ownerId)
+        && incoming().ownerId == existing().ownerId
         && incoming().title is string && incoming().title.size() <= 150;
       allow delete: if isValidId(quizId)
-        && (
-          (isSignedIn() && existing().ownerId == request.auth.uid) ||
-          existing().ownerId == 'guest'
-        );
+        && isOwner(existing().ownerId);
     }
 
     // Live Quiz Sessions
     match /sessions/{sessionId} {
-      allow get, list: if true;
+      allow get: if true;
+      // Only allow small bounded queries (such as findSessionByPin with limit(5)) to prevent bulk scraping
+      allow list: if request.query.limit <= 5;
 
       allow create: if isValidId(sessionId)
         && incoming().pin is string && incoming().pin.size() == 6
-        && (
-          (isSignedIn() && incoming().hostId == request.auth.uid) ||
-          incoming().hostId is string
-        );
+        && isOwner(incoming().hostId);
 
+      // Only the session host can update or advance the session state; hostId and pin are immutable
       allow update: if isValidId(sessionId)
-        && (
-          (isSignedIn() && existing().hostId == request.auth.uid)
-          || existing().hostId == 'prof_local'
-          || existing().hostId == 'prof_demo'
-          || (incoming().diff(existing()).affectedKeys().hasOnly([
-              'timeRemaining',
-              'lastActivityAt',
-              'status',
-              'currentQuestionIndex',
-              'showingResults',
-              'showingPodium',
-              'isAcceptingAnswers',
-              'questionStartedAt',
-              'timeLimitSeconds',
-              'rankingSnapshot'
-            ]))
-        );
+        && isOwner(existing().hostId)
+        && incoming().hostId == existing().hostId
+        && incoming().pin == existing().pin;
 
       allow delete: if isValidId(sessionId)
-        && (
-          (isSignedIn() && existing().hostId == request.auth.uid)
-          || existing().hostId == 'prof_local'
-          || existing().hostId == 'prof_demo'
-        );
+        && isOwner(existing().hostId);
+
+      // Private host-only subcollection storing unredacted answer keys (hidden from students)
+      match /private/{docId} {
+        allow get: if isSessionHost(sessionId);
+        allow list: if false;
+        allow create: if isValidId(docId) && isOwner(incoming().hostId);
+        allow update, delete: if isSessionHost(sessionId);
+      }
 
       // Players subcollection within the session
       match /players/{playerId} {
         allow get, list: if true;
+
+        // New players must start at score 0 and streak 0
         allow create: if isValidId(playerId)
-          && incoming().nickname is string && incoming().nickname.size() <= 40
-          && incoming().sessionId == sessionId;
-        allow update: if isValidId(playerId)
-          && incoming().sessionId == sessionId;
-        allow delete: if (isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid)
-          || get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == 'prof_local'
-          || get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == 'prof_demo';
+          && incoming().nickname is string
+          && incoming().nickname.size() >= 1
+          && incoming().nickname.size() <= 40
+          && incoming().sessionId == sessionId
+          && incoming().score == 0
+          && incoming().streak == 0
+          && (!('uid' in incoming()) || isOwner(incoming().uid));
+
+        // Only the authoritative session host can update player scores/streaks or remove players
+        allow update, delete: if isSessionHost(sessionId);
       }
 
       // Answers subcollection within the session
       match /answers/{answerId} {
         allow get, list: if true;
+
+        // Students can only submit raw ungraded answers (pointsAwarded == 0, isCorrect == false)
+        // once per question while the session is actively accepting answers for that question
         allow create: if isValidId(answerId)
-          && incoming().sessionId == sessionId;
-        allow update: if false;
-        allow delete: if (isSignedIn() && get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == request.auth.uid)
-          || get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == 'prof_local'
-          || get(/databases/$(database)/documents/sessions/$(sessionId)).data.hostId == 'prof_demo';
+          && incoming().sessionId == sessionId
+          && incoming().playerId is string
+          && incoming().questionIndex is int
+          && incoming().pointsAwarded == 0
+          && incoming().isCorrect == false
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.status == 'question'
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.isAcceptingAnswers == true
+          && get(/databases/$(database)/documents/sessions/$(sessionId)).data.currentQuestionIndex == incoming().questionIndex;
+
+        // Only the authoritative session host can grade answers (set isCorrect and pointsAwarded) or delete them on restart
+        allow update, delete: if isSessionHost(sessionId);
       }
     }
 
-    // Consolidated historical reports for teachers
+    // Consolidated historical reports for authenticated teachers only (LGPD privacy)
     match /reports/{reportId} {
-      allow get, list: if (isSignedIn() && resource.data.teacherId == request.auth.uid)
-        || resource.data.teacherId == 'prof_local'
-        || resource.data.teacherId == 'guest';
-      allow create: if isValidId(reportId) && (
-        (isSignedIn() && incoming().teacherId == request.auth.uid)
-        || incoming().teacherId == 'prof_local'
-        || incoming().teacherId == 'guest'
-      );
-      allow update, delete: if isValidId(reportId) && (
-        (isSignedIn() && existing().teacherId == request.auth.uid)
-        || existing().teacherId == 'prof_local'
-        || existing().teacherId == 'guest'
-      );
+      allow get, list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow create: if isValidId(reportId)
+        && isSignedIn()
+        && incoming().teacherId == request.auth.uid;
+      allow update, delete: if isValidId(reportId)
+        && isSignedIn()
+        && existing().teacherId == request.auth.uid;
     }
   }
 }

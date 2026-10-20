@@ -20,7 +20,7 @@ import {
   CopySimple,
 } from '@phosphor-icons/react';
 import { AiQuizGenerator } from './AiQuizGenerator';
-import { auth } from '../lib/firebase';
+import { resolveCurrentUid } from '../lib/firebase';
 import { QUESTION_TYPES_META } from '../lib/quizHelpers';
 
 interface QuizEditorProps {
@@ -421,7 +421,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
 
     setIsSubmitting(true);
     try {
-      const currentUid = auth.currentUser?.uid || quizToEdit?.ownerId || 'guest';
+      const currentUid = resolveCurrentUid();
       await onSave({
         ownerId: currentUid,
         title: title.trim(),
@@ -453,8 +453,10 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+            aria-label="Fechar editor de questionário"
+            className="min-w-[44px] min-h-[44px] p-2 text-zinc-300 hover:text-white rounded-xl hover:bg-zinc-800 transition-colors flex items-center justify-center"
           >
             <X size={16} weight="bold" />
           </button>
@@ -468,7 +470,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
               <button
                 type="button"
                 onClick={() => setErrorMsg('')}
-                className="text-rose-400 hover:text-rose-200"
+                aria-label="Fechar aviso de erro"
+                className="text-rose-300 hover:text-white p-1"
               >
                 <X size={14} weight="bold" />
               </button>
@@ -478,19 +481,19 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
           {/* Details Bento */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2 space-y-1">
-              <label className="text-[11px] font-mono text-zinc-400 uppercase">Título do Quiz</label>
+              <label className="text-xs font-medium text-zinc-300 block">Título do quiz</label>
               <input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Ex: Revolução Francesa ou Ecologia Geral"
-                className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white text-xs sm:text-sm focus:outline-none focus:border-zinc-600"
+                className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white text-xs sm:text-sm placeholder:text-zinc-400 focus:outline-none focus:border-zinc-600"
                 required
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-[11px] font-mono text-zinc-400 uppercase">Disciplina</label>
+              <label className="text-xs font-medium text-zinc-300 block">Disciplina</label>
               <select
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
@@ -511,13 +514,13 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
           </div>
 
           <div className="space-y-1">
-            <label className="text-[11px] font-mono text-zinc-400 uppercase">Instruções para a Turma</label>
+            <label className="text-xs font-medium text-zinc-300 block">Instruções para a turma</label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Ex: Rodada relâmpago de revisão antes da prova bimestral"
-              className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white text-xs sm:text-sm focus:outline-none focus:border-zinc-600"
+              className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-white text-xs sm:text-sm placeholder:text-zinc-400 focus:outline-none focus:border-zinc-600"
             />
           </div>
 
@@ -525,10 +528,10 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
           <div className="space-y-4 pt-3 border-t border-zinc-800">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono text-zinc-400 uppercase">
-                  Questões ({questions.length})
+                <span className="text-xs font-semibold text-zinc-200">
+                  Questões (<strong className="font-mono tabular-nums">{questions.length}</strong>)
                 </span>
-                <span className="text-[10px] text-zinc-500 font-mono">10 formatos suportados</span>
+                <span className="text-xs text-zinc-300">10 formatos suportados</span>
               </div>
 
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -555,8 +558,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
 
                   {isTypeDropdownOpen && (
                     <div className="absolute right-0 mt-1.5 w-64 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-1.5 z-30 space-y-0.5">
-                      <div className="px-2 py-1 text-[10px] font-mono uppercase text-zinc-500 tracking-wider">
-                        Selecione o Formato
+                      <div className="px-2 py-1 text-xs font-medium text-zinc-300">
+                        Selecione o formato
                       </div>
                       {ALL_QUESTION_TYPES.map((typeKey) => {
                         const meta = QUESTION_TYPES_META[typeKey];
@@ -566,14 +569,14 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                             key={typeKey}
                             type="button"
                             onClick={() => addQuestion(typeKey)}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-900 flex items-center gap-2.5 text-zinc-300 hover:text-white transition-colors group"
+                            className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-900 flex items-center gap-2.5 text-zinc-200 hover:text-white transition-colors group"
                           >
-                            <span className="p-1 rounded bg-zinc-900 group-hover:bg-zinc-800 text-zinc-400 group-hover:text-zinc-100">
+                            <span className="p-1 rounded bg-zinc-900 group-hover:bg-zinc-800 text-zinc-300 group-hover:text-zinc-100">
                               <Icon size={14} weight="bold" />
                             </span>
                             <div className="flex-1 min-w-0">
                               <div className="text-xs font-medium truncate">{meta.label}</div>
-                              <div className="text-[10px] text-zinc-500 truncate">{meta.description}</div>
+                              <div className="text-[11px] text-zinc-400 truncate">{meta.description}</div>
                             </div>
                           </button>
                         );
@@ -596,9 +599,9 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     className="p-4 rounded-xl bg-zinc-950 border border-zinc-850 hover:border-zinc-800 space-y-3 text-xs transition-colors"
                   >
                     {/* Question Header Bar */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-zinc-400">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-zinc-300">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-zinc-400 font-semibold text-[11px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">
+                        <span className="font-mono text-zinc-300 font-semibold text-xs px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 tabular-nums">
                           #{qIdx + 1}
                         </span>
 
@@ -615,7 +618,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                               </option>
                             ))}
                           </select>
-                          <span className="absolute left-2 pointer-events-none text-zinc-400">
+                          <span className="absolute left-2 pointer-events-none text-zinc-300">
                             <CurrentIcon size={13} weight="bold" />
                           </span>
                         </div>
@@ -623,12 +626,12 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
 
                       <div className="flex items-center gap-2">
                         {/* Time limit */}
-                        <div className="flex items-center gap-1 text-[11px] bg-zinc-900 px-2 py-0.5 rounded-lg border border-zinc-800">
-                          <ClockCountdown size={13} weight="regular" className="text-zinc-400" />
+                        <div className="flex items-center gap-1 text-xs bg-zinc-900 px-2 py-0.5 rounded-lg border border-zinc-800">
+                          <ClockCountdown size={13} weight="regular" className="text-zinc-300" />
                           <select
                             value={q.timeLimit}
                             onChange={(e) => updateQuestionField(qIdx, 'timeLimit', Number(e.target.value))}
-                            className="bg-transparent text-zinc-300 focus:outline-none cursor-pointer"
+                            className="bg-transparent text-zinc-200 focus:outline-none cursor-pointer"
                           >
                             <option value={10}>10s</option>
                             <option value={15}>15s</option>
@@ -641,12 +644,12 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                         </div>
 
                         {/* Points */}
-                        <div className="flex items-center gap-1 text-[11px] bg-zinc-900 px-2 py-0.5 rounded-lg border border-zinc-800">
-                          <Trophy size={13} weight="regular" className="text-zinc-400" />
+                        <div className="flex items-center gap-1 text-xs bg-zinc-900 px-2 py-0.5 rounded-lg border border-zinc-800">
+                          <Trophy size={13} weight="regular" className="text-zinc-300" />
                           <select
                             value={q.points}
                             onChange={(e) => updateQuestionField(qIdx, 'points', Number(e.target.value))}
-                            className="bg-transparent text-zinc-300 focus:outline-none cursor-pointer"
+                            className="bg-transparent text-zinc-200 focus:outline-none cursor-pointer"
                           >
                             <option value={1000}>1000 pts</option>
                             <option value={2000}>2000 pts (Dobro)</option>
@@ -661,7 +664,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                             type="button"
                             disabled={qIdx === 0}
                             onClick={() => moveQuestion(qIdx, 'up')}
-                            className="text-zinc-400 hover:text-zinc-100 disabled:opacity-30 p-1 rounded hover:bg-zinc-800 transition-colors"
+                            aria-label="Mover questão para cima"
+                            className="text-zinc-300 hover:text-zinc-100 disabled:opacity-30 p-1 rounded hover:bg-zinc-800 transition-colors"
                             title="Mover questão para cima"
                           >
                             <ArrowUp size={13} weight="bold" />
@@ -670,7 +674,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                             type="button"
                             disabled={qIdx === questions.length - 1}
                             onClick={() => moveQuestion(qIdx, 'down')}
-                            className="text-zinc-400 hover:text-zinc-100 disabled:opacity-30 p-1 rounded hover:bg-zinc-800 transition-colors"
+                            aria-label="Mover questão para baixo"
+                            className="text-zinc-300 hover:text-zinc-100 disabled:opacity-30 p-1 rounded hover:bg-zinc-800 transition-colors"
                             title="Mover questão para baixo"
                           >
                             <ArrowDown size={13} weight="bold" />
@@ -678,7 +683,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                           <button
                             type="button"
                             onClick={() => duplicateQuestion(qIdx)}
-                            className="text-zinc-400 hover:text-zinc-100 p-1 rounded hover:bg-zinc-800 transition-colors"
+                            aria-label="Duplicar questão"
+                            className="text-zinc-300 hover:text-zinc-100 p-1 rounded hover:bg-zinc-800 transition-colors"
                             title="Duplicar questão"
                           >
                             <CopySimple size={13} weight="bold" />
@@ -688,7 +694,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                         <button
                           type="button"
                           onClick={() => removeQuestion(qIdx)}
-                          className="text-zinc-500 hover:text-rose-400 p-1 rounded hover:bg-zinc-900 transition-colors"
+                          aria-label="Remover questão"
+                          className="text-zinc-300 hover:text-rose-400 p-1 rounded hover:bg-zinc-900 transition-colors"
                           title="Remover questão"
                         >
                           <Trash size={15} weight="regular" />
@@ -703,7 +710,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                         value={q.question}
                         onChange={(e) => updateQuestionField(qIdx, 'question', e.target.value)}
                         placeholder={`Enunciado da pergunta (${currentMeta.label})...`}
-                        className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-100 text-xs sm:text-sm focus:outline-none focus:border-zinc-700 font-medium placeholder-zinc-600"
+                        className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-100 text-xs sm:text-sm focus:outline-none focus:border-zinc-700 font-medium placeholder:text-zinc-400"
                         required
                       />
                     </div>
@@ -713,13 +720,13 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     {/* 1. MÚLTIPLA ESCOLHA */}
                     {q.type === 'multiple' && (
                       <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                        <div className="flex items-center justify-between text-xs text-zinc-300">
                           <span>Marque o botão de opção correspondente à resposta correta:</span>
                           {(q.options || []).length < 6 && (
                             <button
                               type="button"
                               onClick={() => addOption(qIdx)}
-                              className="text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                              className="text-zinc-300 hover:text-white flex items-center gap-1"
                             >
                               <Plus size={11} weight="bold" />
                               <span>Adicionar alternativa</span>
@@ -752,14 +759,15 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                   value={opt}
                                   onChange={(e) => updateOption(qIdx, optIdx, e.target.value)}
                                   placeholder={`Alternativa ${String.fromCharCode(65 + optIdx)}`}
-                                  className="w-full bg-transparent text-xs text-zinc-200 focus:outline-none font-medium"
+                                  className="w-full bg-transparent text-xs text-zinc-100 placeholder:text-zinc-400 focus:outline-none font-medium"
                                   required
                                 />
                                 {(q.options || []).length > 2 && (
                                   <button
                                     type="button"
                                     onClick={() => removeOption(qIdx, optIdx)}
-                                    className="text-zinc-600 hover:text-rose-400 shrink-0"
+                                    aria-label={`Remover alternativa ${String.fromCharCode(65 + optIdx)}`}
+                                    className="text-zinc-400 hover:text-rose-400 shrink-0"
                                   >
                                     <X size={12} weight="bold" />
                                   </button>
@@ -804,22 +812,22 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                       <div className="space-y-2 pt-1">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div className="space-y-1">
-                            <label className="text-[10px] font-mono text-zinc-400 uppercase">
-                              Resposta Correta Principal
+                            <label className="text-xs font-medium text-zinc-300 block">
+                              Resposta correta principal
                             </label>
                             <input
                               type="text"
                               value={q.correctAnswer || ''}
                               onChange={(e) => updateQuestionField(qIdx, 'correctAnswer', e.target.value)}
                               placeholder="Ex: Fotossíntese"
-                              className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-700 font-medium"
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white placeholder:text-zinc-400 focus:outline-none focus:border-zinc-700 font-medium"
                               required
                             />
                           </div>
 
                           <div className="space-y-1">
-                            <label className="text-[10px] font-mono text-zinc-400 uppercase">
-                              Variações / Sinônimos Aceitos (separados por vírgula)
+                            <label className="text-xs font-medium text-zinc-300 block">
+                              Variações / sinônimos aceitos (separados por vírgula)
                             </label>
                             <input
                               type="text"
@@ -832,11 +840,11 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                 updateQuestionField(qIdx, 'acceptedAnswers', list);
                               }}
                               placeholder="Ex: fotossintese, processo de fotossíntese"
-                              className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-700"
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white placeholder:text-zinc-400 focus:outline-none focus:border-zinc-700"
                             />
                           </div>
                         </div>
-                        <p className="text-[10px] text-zinc-500">
+                        <p className="text-xs text-zinc-300">
                           O sistema ignora automaticamente diferenças entre maiúsculas, minúsculas e acentos na conferência.
                         </p>
                       </div>
@@ -845,13 +853,13 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     {/* 4. ASSOCIAÇÃO DE PARES */}
                     {q.type === 'matching' && (
                       <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                        <div className="flex items-center justify-between text-xs text-zinc-300">
                           <span>Associe cada conceito da esquerda à sua definição correspondente na direita:</span>
                           {(q.pairs || []).length < 6 && (
                             <button
                               type="button"
                               onClick={() => addPair(qIdx)}
-                              className="text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                              className="text-zinc-300 hover:text-white flex items-center gap-1"
                             >
                               <Plus size={11} weight="bold" />
                               <span>Adicionar par</span>
@@ -867,23 +875,24 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                 value={pair.left}
                                 onChange={(e) => updatePair(qIdx, pIdx, 'left', e.target.value)}
                                 placeholder={`Item ${pIdx + 1} (ex: Amazônia)`}
-                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-700 font-medium"
+                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white placeholder:text-zinc-400 focus:outline-none focus:border-zinc-700 font-medium"
                                 required
                               />
-                              <ArrowsLeftRight size={14} weight="regular" className="text-zinc-500 shrink-0" />
+                              <ArrowsLeftRight size={14} weight="regular" className="text-zinc-400 shrink-0" />
                               <input
                                 type="text"
                                 value={pair.right}
                                 onChange={(e) => updatePair(qIdx, pIdx, 'right', e.target.value)}
                                 placeholder={`Correspondente ${pIdx + 1} (ex: Maior floresta tropical)`}
-                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-700 font-medium"
+                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white placeholder:text-zinc-400 focus:outline-none focus:border-zinc-700 font-medium"
                                 required
                               />
                               {(q.pairs || []).length > 2 && (
                                 <button
                                   type="button"
                                   onClick={() => removePair(qIdx, pIdx)}
-                                  className="text-zinc-600 hover:text-rose-400 p-1 shrink-0"
+                                  aria-label={`Remover par ${pIdx + 1}`}
+                                  className="text-zinc-400 hover:text-rose-400 p-1 shrink-0"
                                 >
                                   <Trash size={13} weight="regular" />
                                 </button>
@@ -897,13 +906,13 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     {/* 5. ORDENAÇÃO OU CLASSIFICAÇÃO */}
                     {q.type === 'ordering' && (
                       <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                        <div className="flex items-center justify-between text-xs text-zinc-300">
                           <span>Escreva os itens na <strong>ordem correta</strong> (o aluno receberá embaralhado):</span>
                           {(q.itemsOrder || []).length < 6 && (
                             <button
                               type="button"
                               onClick={() => addOrderItem(qIdx)}
-                              className="text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                              className="text-zinc-300 hover:text-white flex items-center gap-1"
                             >
                               <Plus size={11} weight="bold" />
                               <span>Adicionar etapa</span>
@@ -914,7 +923,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                         <div className="space-y-1.5">
                           {(q.itemsOrder || []).map((item, itemIdx) => (
                             <div key={itemIdx} className="flex items-center gap-2">
-                              <span className="font-mono text-[10px] w-5 text-center text-zinc-400 font-semibold">
+                              <span className="font-mono text-xs w-5 text-center text-zinc-300 font-semibold tabular-nums">
                                 {itemIdx + 1}º
                               </span>
                               <input
@@ -922,7 +931,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                 value={item}
                                 onChange={(e) => updateOrderItem(qIdx, itemIdx, e.target.value)}
                                 placeholder={`Etapa ${itemIdx + 1}...`}
-                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-700 font-medium"
+                                className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white placeholder:text-zinc-400 focus:outline-none focus:border-zinc-700 font-medium"
                                 required
                               />
                               <div className="flex items-center gap-0.5 shrink-0">
@@ -930,7 +939,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                   type="button"
                                   disabled={itemIdx === 0}
                                   onClick={() => moveOrderItem(qIdx, itemIdx, 'up')}
-                                  className="p-1 rounded text-zinc-500 hover:text-zinc-200 disabled:opacity-20"
+                                  aria-label="Mover etapa para cima"
+                                  className="p-1 rounded text-zinc-300 hover:text-white disabled:opacity-20"
                                 >
                                   <ArrowUp size={12} weight="bold" />
                                 </button>
@@ -938,7 +948,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                   type="button"
                                   disabled={itemIdx === (q.itemsOrder || []).length - 1}
                                   onClick={() => moveOrderItem(qIdx, itemIdx, 'down')}
-                                  className="p-1 rounded text-zinc-500 hover:text-zinc-200 disabled:opacity-20"
+                                  aria-label="Mover etapa para baixo"
+                                  className="p-1 rounded text-zinc-300 hover:text-white disabled:opacity-20"
                                 >
                                   <ArrowDown size={12} weight="bold" />
                                 </button>
@@ -946,7 +957,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                   <button
                                     type="button"
                                     onClick={() => removeOrderItem(qIdx, itemIdx)}
-                                    className="p-1 text-zinc-600 hover:text-rose-400"
+                                    aria-label={`Remover etapa ${itemIdx + 1}`}
+                                    className="p-1 text-zinc-400 hover:text-rose-400"
                                   >
                                     <Trash size={13} weight="regular" />
                                   </button>
@@ -962,8 +974,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     {q.type === 'image' && (
                       <div className="space-y-2.5 pt-1">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-mono text-zinc-400 uppercase">
-                            URL da Imagem de Estímulo
+                          <label className="text-xs font-medium text-zinc-300 block">
+                            URL da imagem de estímulo
                           </label>
                           <div className="flex gap-2">
                             <input
@@ -971,7 +983,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                               value={q.mediaUrl || ''}
                               onChange={(e) => updateQuestionField(qIdx, 'mediaUrl', e.target.value)}
                               placeholder="https://exemplo.com/grafico-ou-mapa.jpg"
-                              className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none focus:border-zinc-700 font-mono"
+                              className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white placeholder:text-zinc-400 focus:outline-none focus:border-zinc-700 font-mono"
                               required
                             />
                             {q.mediaUrl && (
@@ -991,7 +1003,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
 
                         {/* Options */}
                         <div className="space-y-1.5">
-                          <span className="text-[11px] text-zinc-500">Alternativas da questão:</span>
+                          <span className="text-xs text-zinc-300">Alternativas da questão:</span>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {(q.options || []).map((opt, optIdx) => {
                               const isCorrect = q.correctAnswer === opt && opt.length > 0;
@@ -1014,7 +1026,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                     value={opt}
                                     onChange={(e) => updateOption(qIdx, optIdx, e.target.value)}
                                     placeholder={`Opção ${String.fromCharCode(65 + optIdx)}`}
-                                    className="w-full bg-transparent text-xs text-zinc-200 focus:outline-none"
+                                    className="w-full bg-transparent text-xs text-zinc-100 placeholder:text-zinc-400 focus:outline-none"
                                     required
                                   />
                                 </div>
@@ -1030,8 +1042,8 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                       <div className="space-y-2.5 pt-1">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <div className="space-y-1">
-                            <label className="text-[10px] font-mono text-zinc-400 uppercase">
-                              Tipo de Mídia
+                            <label className="text-xs font-medium text-zinc-300 block">
+                              Tipo de mídia
                             </label>
                             <select
                               value={q.mediaType || 'video'}
@@ -1044,15 +1056,15 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                           </div>
 
                           <div className="sm:col-span-2 space-y-1">
-                            <label className="text-[10px] font-mono text-zinc-400 uppercase">
-                              URL do Arquivo ou Vídeo
+                            <label className="text-xs font-medium text-zinc-300 block">
+                              URL do arquivo ou vídeo
                             </label>
                             <input
                               type="url"
                               value={q.mediaUrl || ''}
                               onChange={(e) => updateQuestionField(qIdx, 'mediaUrl', e.target.value)}
                               placeholder="https://exemplo.com/audio.mp3 ou link do YouTube"
-                              className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white focus:outline-none font-mono"
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-white placeholder:text-zinc-400 focus:outline-none font-mono"
                               required
                             />
                           </div>
@@ -1060,7 +1072,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
 
                         {/* Options */}
                         <div className="space-y-1.5">
-                          <span className="text-[11px] text-zinc-500">Alternativas da questão:</span>
+                          <span className="text-xs text-zinc-300">Alternativas da questão:</span>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {(q.options || []).map((opt, optIdx) => {
                               const isCorrect = q.correctAnswer === opt && opt.length > 0;
@@ -1083,7 +1095,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                     value={opt}
                                     onChange={(e) => updateOption(qIdx, optIdx, e.target.value)}
                                     placeholder={`Opção ${String.fromCharCode(65 + optIdx)}`}
-                                    className="w-full bg-transparent text-xs text-zinc-200 focus:outline-none"
+                                    className="w-full bg-transparent text-xs text-zinc-100 placeholder:text-zinc-400 focus:outline-none"
                                     required
                                   />
                                 </div>
@@ -1097,11 +1109,11 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     {/* 8. NUVEM DE PALAVRAS */}
                     {q.type === 'word_cloud' && (
                       <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 space-y-1.5">
-                        <div className="flex items-center gap-2 text-zinc-300 font-medium">
-                          <Cloud size={15} weight="bold" className="text-zinc-400" />
-                          <span>Nuvem de Palavras Coletiva</span>
+                        <div className="flex items-center gap-2 text-zinc-200 font-medium">
+                          <Cloud size={15} weight="bold" className="text-zinc-300" />
+                          <span>Nuvem de palavras coletiva</span>
                         </div>
-                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        <p className="text-xs text-zinc-300 leading-relaxed">
                           Cada participante digita uma palavra ou expressão. As respostas aparecerão agrupadas visualmente no telão da sala, com destaque tipográfico para os termos mais votados.
                         </p>
                       </div>
@@ -1110,13 +1122,13 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     {/* 9. ENQUETE OU VOTAÇÃO */}
                     {q.type === 'poll' && (
                       <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                        <div className="flex items-center justify-between text-xs text-zinc-300">
                           <span>Opções da enquete (votação de opinião, sem resposta certa/errada):</span>
                           {(q.options || []).length < 6 && (
                             <button
                               type="button"
                               onClick={() => addOption(qIdx)}
-                              className="text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                              className="text-zinc-300 hover:text-white flex items-center gap-1"
                             >
                               <Plus size={11} weight="bold" />
                               <span>Adicionar opção</span>
@@ -1130,7 +1142,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                               key={optIdx}
                               className="flex items-center gap-2 p-2 rounded-lg border bg-zinc-900 border-zinc-800"
                             >
-                              <span className="font-mono text-[10px] text-zinc-500 w-4">
+                              <span className="font-mono text-xs text-zinc-400 w-4">
                                 {String.fromCharCode(65 + optIdx)}
                               </span>
                               <input
@@ -1138,14 +1150,15 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                                 value={opt}
                                 onChange={(e) => updateOption(qIdx, optIdx, e.target.value)}
                                 placeholder={`Opção de voto ${optIdx + 1}`}
-                                className="w-full bg-transparent text-xs text-zinc-200 focus:outline-none"
+                                className="w-full bg-transparent text-xs text-zinc-100 placeholder:text-zinc-400 focus:outline-none"
                                 required
                               />
                               {(q.options || []).length > 2 && (
                                 <button
                                   type="button"
                                   onClick={() => removeOption(qIdx, optIdx)}
-                                  className="text-zinc-600 hover:text-rose-400 shrink-0"
+                                  aria-label={`Remover opção ${optIdx + 1}`}
+                                  className="text-zinc-400 hover:text-rose-400 shrink-0"
                                 >
                                   <X size={12} weight="bold" />
                                 </button>
@@ -1159,11 +1172,11 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                     {/* 10. RESPOSTA ABERTA OU DISCURSIVA */}
                     {q.type === 'open_ended' && (
                       <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 space-y-1.5">
-                        <div className="flex items-center gap-2 text-zinc-300 font-medium">
-                          <Article size={15} weight="bold" className="text-zinc-400" />
-                          <span>Resposta Aberta / Discursiva</span>
+                        <div className="flex items-center gap-2 text-zinc-200 font-medium">
+                          <Article size={15} weight="bold" className="text-zinc-300" />
+                          <span>Resposta aberta / discursiva</span>
                         </div>
-                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                        <p className="text-xs text-zinc-300 leading-relaxed">
                           O participante redige uma resposta elaborada justificando sua reflexão. As respostas são projetadas em cartões individuais na tela de resultados para mediação do professor.
                         </p>
                       </div>
@@ -1176,7 +1189,7 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
                         value={q.explanation || ''}
                         onChange={(e) => updateQuestionField(qIdx, 'explanation', e.target.value)}
                         placeholder="Comentário ou dica pedagógica exibida após o fechamento da questão..."
-                        className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900/50 border border-zinc-850 text-[11px] text-zinc-400 focus:outline-none focus:border-zinc-700"
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900/50 border border-zinc-850 text-xs text-zinc-300 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-700"
                       />
                     </div>
                   </div>
@@ -1187,21 +1200,21 @@ export const QuizEditor: React.FC<QuizEditorProps> = ({ quizToEdit, onSave, onCl
 
           {/* Footer Save & Cancel */}
           <div className="pt-3 border-t border-zinc-800 flex items-center justify-between gap-2 shrink-0">
-            <span className="text-[11px] text-zinc-500 font-mono">
-              {questions.length} questão(ões) configurada(s)
+            <span className="text-xs text-zinc-300">
+              <strong className="font-mono tabular-nums">{questions.length}</strong> questão(ões) configurada(s)
             </span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3.5 py-2 rounded-xl text-zinc-400 hover:text-white text-xs font-medium transition-colors"
+                className="min-h-[40px] px-3.5 py-2 rounded-xl text-zinc-300 hover:text-white text-xs font-medium transition-colors"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50"
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
                 <FloppyDisk size={14} weight="bold" />
                 <span>{isSubmitting ? 'Salvando...' : 'Salvar Questionário'}</span>

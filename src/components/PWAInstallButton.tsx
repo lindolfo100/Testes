@@ -1,67 +1,83 @@
 import React, { useState } from 'react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
-import { DownloadSimple, DeviceMobile, X, CheckCircle, ShareNetwork } from '@phosphor-icons/react';
+import { STORAGE_KEYS } from '../constants/storage';
+import { DownloadSimple, DeviceMobile, X, CheckCircle } from '@phosphor-icons/react';
 
-interface PWAInstallButtonProps {
-  className?: string;
-  variant?: 'compact' | 'full';
-}
-
-export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
-  className = '',
-  variant = 'compact',
-}) => {
+export const PWAInstallBanner: React.FC = () => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+  const [isDismissed, setIsDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.PWA_BANNER_DISMISSED) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [showIOSGuide, setShowIOSGuide] = useState(false);
   const [installedSuccess, setInstalledSuccess] = useState(false);
 
-  // If already running as an installed PWA in standalone mode, suppress button
-  if (isInstalled) {
+  if (isInstalled || isDismissed) {
     return null;
   }
+
+  const handleDismiss = () => {
+    setIsDismissed(true);
+    try {
+      localStorage.setItem(STORAGE_KEYS.PWA_BANNER_DISMISSED, '1');
+    } catch {}
+  };
 
   const handleInstallClick = async () => {
     if (isInstallable) {
       const success = await install();
       if (success) {
         setInstalledSuccess(true);
-        setTimeout(() => setInstalledSuccess(false), 4000);
+        setTimeout(() => handleDismiss(), 2500);
       }
-    } else if (isIOS) {
-      setShowIOSGuide(true);
     } else {
-      // General instructions for desktop/mobile browsers that do not trigger beforeinstallprompt
       setShowIOSGuide(true);
     }
   };
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleInstallClick}
-        className={
-          className ||
-          `px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 text-xs font-medium transition-all flex items-center gap-1.5 active:scale-[0.98]`
-        }
-        title="Instalar Valendo! no celular, tablet ou computador"
-      >
-        {installedSuccess ? (
-          <>
-            <CheckCircle size={14} weight="fill" className="text-emerald-400" />
-            <span className="text-emerald-400">Instalado!</span>
-          </>
-        ) : (
-          <>
-            <DownloadSimple size={14} weight="bold" className="text-amber-400" />
-            <span className={variant === 'compact' ? 'hidden sm:inline' : 'inline'}>
-              Instalar App
+      <div className="bg-zinc-900/90 border-b border-zinc-800/80 px-4 py-2 text-xs text-zinc-300">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <DownloadSimple size={16} weight="bold" className="text-amber-400 shrink-0" />
+            <span className="truncate">
+              Instale o <strong className="text-zinc-100">Valendo!</strong> para acesso rápido em tela cheia.
             </span>
-          </>
-        )}
-      </button>
+          </div>
 
-      {/* Guide modal for iOS and alternative browsers */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleInstallClick}
+              className="min-h-[36px] px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-100 font-semibold transition-colors flex items-center gap-1.5"
+            >
+              {installedSuccess ? (
+                <>
+                  <CheckCircle size={14} weight="fill" className="text-emerald-400" />
+                  <span className="text-emerald-300">Instalado!</span>
+                </>
+              ) : (
+                <span>Instalar</span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDismiss}
+              aria-label="Dispensar aviso de instalação"
+              title="Não mostrar novamente"
+              className="min-w-[36px] min-h-[36px] p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 flex items-center justify-center transition-colors"
+            >
+              <X size={15} weight="bold" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {showIOSGuide && (
         <div
           onClick={() => setShowIOSGuide(false)}
@@ -81,7 +97,8 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
               <button
                 type="button"
                 onClick={() => setShowIOSGuide(false)}
-                className="p-1 rounded-lg text-zinc-400 hover:text-white"
+                aria-label="Fechar instruções de instalação"
+                className="min-w-[44px] min-h-[44px] p-2 rounded-lg text-zinc-400 hover:text-white flex items-center justify-center"
               >
                 <X size={16} weight="bold" />
               </button>
@@ -90,41 +107,43 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
             {isIOS ? (
               <div className="space-y-3 text-xs text-zinc-300 leading-relaxed">
                 <p>
-                  No Safari do iOS, você pode fixar o <strong>Valendo!</strong> na sua tela de início sem precisar da App Store:
+                  No Safari do iOS, fixe o <strong>Valendo!</strong> na tela de início:
                 </p>
-                <ol className="space-y-2 list-decimal list-inside bg-zinc-950 p-3 rounded-xl border border-zinc-800 font-mono text-[11px] text-zinc-400">
+                <ol className="space-y-2 list-decimal list-inside bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs text-zinc-300">
                   <li>
-                    Toque no botão <strong className="text-zinc-200">Compartilhar</strong> (ícone com quadrado e seta para cima).
+                    Toque em <strong className="text-zinc-100">Compartilhar</strong> na barra do Safari.
                   </li>
                   <li>
-                    Role para baixo e selecione <strong className="text-zinc-200">Adicionar à Tela de Início</strong>.
+                    Selecione <strong className="text-zinc-100">Adicionar à Tela de Início</strong>.
                   </li>
                   <li>
-                    Toque em <strong className="text-zinc-200">Adicionar</strong> no canto superior direito.
+                    Confirme em <strong className="text-zinc-100">Adicionar</strong>.
                   </li>
                 </ol>
               </div>
             ) : (
               <div className="space-y-3 text-xs text-zinc-300 leading-relaxed">
                 <p>
-                  Para fixar o <strong>Valendo!</strong> como aplicativo nativo no Chrome, Edge ou celular:
+                  Para instalar o <strong>Valendo!</strong> no navegador:
                 </p>
-                <ol className="space-y-2 list-decimal list-inside bg-zinc-950 p-3 rounded-xl border border-zinc-800 font-mono text-[11px] text-zinc-400">
+                <ol className="space-y-2 list-decimal list-inside bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs text-zinc-300">
                   <li>
-                    Clique nos <strong className="text-zinc-200">três pontinhos (Menu)</strong> do navegador.
+                    Abra o <strong className="text-zinc-100">menu do navegador (⋮)</strong>.
                   </li>
                   <li>
-                    Selecione <strong className="text-zinc-200">Instalar Valendo!</strong> ou <em>Adicionar à Tela Inicial</em>.
+                    Toque em <strong className="text-zinc-100">Instalar aplicativo</strong> ou <em>Adicionar à tela inicial</em>.
                   </li>
-                  <li>Abra o aplicativo direto com suporte a tela cheia.</li>
                 </ol>
               </div>
             )}
 
             <button
               type="button"
-              onClick={() => setShowIOSGuide(false)}
-              className="w-full py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition-colors"
+              onClick={() => {
+                setShowIOSGuide(false);
+                handleDismiss();
+              }}
+              className="w-full min-h-[44px] py-2.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition-colors"
             >
               Entendido
             </button>
@@ -134,3 +153,4 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
     </>
   );
 };
+

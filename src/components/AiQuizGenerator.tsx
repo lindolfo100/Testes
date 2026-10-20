@@ -3,6 +3,8 @@ import { Question } from '../types/quiz';
 import { parseEducationalTextToQuestions } from '../lib/quizParser';
 import { QUESTION_TYPES_META } from '../lib/quizHelpers';
 import { AiGenerationFormat } from '../lib/geminiQuizService';
+import { auth, resolveCurrentUid } from '../lib/firebase';
+import { STORAGE_KEYS } from '../constants/storage';
 import { AiStudioIllustration } from './BrandIllustrations';
 import {
   Sparkle,
@@ -12,6 +14,8 @@ import {
   ArrowClockwise,
   X,
   ArrowRight,
+  Key,
+  ArrowSquareOut,
 } from '@phosphor-icons/react';
 
 interface AiQuizGeneratorProps {
@@ -45,6 +49,14 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
   const [questionCount, setQuestionCount] = useState(5);
   const [timeLimit, setTimeLimit] = useState(20);
 
+  // Chave pessoal do Gemini do professor (fica salva apenas neste dispositivo)
+  const [userApiKey, setUserApiKey] = useState(() => {
+    return localStorage.getItem(STORAGE_KEYS.USER_GEMINI_API_KEY) || '';
+  });
+  const [isConfiguringKey, setIsConfiguringKey] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [apiKeyFeedback, setApiKeyFeedback] = useState<string | null>(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [generatedResult, setGeneratedResult] = useState<{
@@ -53,6 +65,42 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
     description: string;
     questions: Question[];
   } | null>(null);
+
+  const handleSaveApiKey = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = apiKeyInput.trim();
+    if (!clean) {
+      setApiKeyFeedback('Cole sua chave da API antes de salvar.');
+      return;
+    }
+    if (clean.length < 15) {
+      setApiKeyFeedback('Chave aparentemente incompleta. Copie o valor completo gerado no Google AI Studio.');
+      return;
+    }
+    localStorage.setItem(STORAGE_KEYS.USER_GEMINI_API_KEY, clean);
+    setUserApiKey(clean);
+    setIsConfiguringKey(false);
+    setApiKeyFeedback(null);
+  };
+
+  const handleRemoveApiKey = () => {
+    localStorage.removeItem(STORAGE_KEYS.USER_GEMINI_API_KEY);
+    setUserApiKey('');
+    setApiKeyInput('');
+    setIsConfiguringKey(false);
+    setApiKeyFeedback(null);
+  };
+
+  const handleStartConfigKey = () => {
+    setApiKeyInput(userApiKey);
+    setIsConfiguringKey(true);
+    setApiKeyFeedback(null);
+  };
+
+  const handleCancelConfigKey = () => {
+    setIsConfiguringKey(false);
+    setApiKeyFeedback(null);
+  };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,15 +117,31 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
     setErrorMsg('');
 
     try {
+      const idToken = auth.currentUser
+        ? await auth.currentUser.getIdToken().catch(() => null)
+        : null;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Client-Id': resolveCurrentUid(),
+      };
+      if (idToken) {
+        headers['Authorization'] = `Bearer ${idToken}`;
+      }
+      if (userApiKey.trim()) {
+        headers['x-gemini-api-key'] = userApiKey.trim();
+      }
+
       const response = await fetch('/api/gemini/generate-quiz', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           mode,
           text: inputText.trim(),
           questionType: questionFormat,
           count: questionCount,
           defaultTimeLimit: timeLimit,
+          apiKey: userApiKey.trim() || undefined,
         }),
       });
 
@@ -150,8 +214,10 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+            aria-label="Fechar assistente pedagógico IA"
+            className="min-w-[44px] min-h-[44px] p-2 text-zinc-300 hover:text-white rounded-xl hover:bg-zinc-800 transition-colors flex items-center justify-center"
           >
             <X size={16} weight="bold" />
           </button>
@@ -159,6 +225,118 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
 
         {/* Body */}
         <div className="p-5 overflow-y-auto flex-1 space-y-4">
+          {/* Banner de Quota e Chave Pessoal do Professor */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                    userApiKey
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-zinc-800 text-zinc-400 border border-zinc-750'
+                  }`}
+                >
+                  <Key size={14} weight={userApiKey ? 'fill' : 'regular'} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-semibold text-zinc-200">
+                      {userApiKey ? 'Sua Cota Gemini Exclusiva' : 'Cota Padrão Compartilhada'}
+                    </span>
+                    {userApiKey ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium">
+                        Ativa
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 font-medium">
+                        Sistema
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-zinc-400 truncate sm:whitespace-normal">
+                    {userApiKey
+                      ? `Chave pessoal configurada (•••${userApiKey.slice(-4)}). Gerações sem fila ou limites compartilhados.`
+                      : 'Conecte sua chave gratuita do Google AI Studio para usar seu próprio limite sem compartilhar com outros.'}
+                  </p>
+                </div>
+              </div>
+
+              {!isConfiguringKey && (
+                <button
+                  type="button"
+                  onClick={handleStartConfigKey}
+                  className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-[11px] font-medium border border-zinc-700 transition-colors shrink-0"
+                >
+                  {userApiKey ? 'Gerenciar Chave' : 'Conectar Chave'}
+                </button>
+              )}
+            </div>
+
+            {/* Painel de Configuração / Edição da Chave */}
+            {isConfiguringKey && (
+              <div className="pt-2 border-t border-zinc-800/80 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] text-zinc-400">
+                  <span>
+                    Obtenha sua chave gratuita com sua conta Google:
+                  </span>
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-amber-400 hover:text-amber-300 font-medium transition-colors underline underline-offset-2"
+                  >
+                    <span>Abrir Google AI Studio</span>
+                    <ArrowSquareOut size={12} weight="bold" />
+                  </a>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap sm:flex-nowrap gap-2">
+                    <input
+                      type="password"
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder="Cole aqui sua chave (ex: AIzaSy...)"
+                      className="flex-1 min-w-[200px] px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-750 text-white text-xs placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveApiKey()}
+                      className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs transition-colors shrink-0"
+                    >
+                      Salvar Chave
+                    </button>
+                    {userApiKey && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveApiKey}
+                        className="px-2.5 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-500/30 text-xs transition-colors shrink-0"
+                        title="Remover chave e voltar para a cota compartilhada"
+                      >
+                        Remover
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleCancelConfigKey}
+                      className="px-2.5 py-1.5 rounded-lg text-zinc-400 hover:text-white text-xs transition-colors shrink-0"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+
+                  {apiKeyFeedback && (
+                    <p className="text-[11px] text-amber-300">{apiKeyFeedback}</p>
+                  )}
+
+                  <p className="text-[10px] text-zinc-400 leading-relaxed">
+                    Sua chave é salva somente no seu navegador (<code className="text-zinc-300">localStorage</code>) e enviada via canal seguro direto para o Gemini ao gerar questões. Nunca é compartilhada com outros usuários.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {errorMsg && (
             <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/30 text-rose-300 text-xs space-y-2">
               <div className="flex items-center gap-2">
@@ -189,7 +367,7 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
                   className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all ${
                     mode === 'paste'
                       ? 'bg-zinc-800 text-white shadow-sm'
-                      : 'text-zinc-400 hover:text-white'
+                      : 'text-zinc-300 hover:text-white'
                   }`}
                 >
                   Colar Questões / Anotações
@@ -200,7 +378,7 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
                   className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all ${
                     mode === 'topic'
                       ? 'bg-zinc-800 text-white shadow-sm'
-                      : 'text-zinc-400 hover:text-white'
+                      : 'text-zinc-300 hover:text-white'
                   }`}
                 >
                   Gerar por Tema da Aula
@@ -209,7 +387,7 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
 
               {/* Text Input */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block">
+                <label className="text-xs font-medium text-zinc-300 block">
                   {mode === 'paste' ? 'Conteúdo / Perguntas' : 'Tema da Aula'}
                 </label>
                 <textarea
@@ -221,15 +399,15 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
                       ? '1. O Sol é uma anã amarela. R: Verdadeiro\n2. Qual é a fórmula da água? R: H2O'
                       : 'Ex: Biomas brasileiros, clima e vegetação para o 7º ano do Ensino Fundamental.'
                   }
-                  className="w-full p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-white text-xs sm:text-sm focus:outline-none focus:border-zinc-600 font-sans leading-relaxed placeholder:text-zinc-600"
+                  className="w-full p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-white text-xs sm:text-sm focus:outline-none focus:border-zinc-600 font-sans leading-relaxed placeholder:text-zinc-400"
                   required
                 />
               </div>
 
               {/* Format selection */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block">
-                  Formato das Questões
+                <label className="text-xs font-medium text-zinc-300 block">
+                  Formato das questões
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {AI_FORMAT_OPTIONS.map((fmt) => (
@@ -237,10 +415,10 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
                       key={fmt.id}
                       type="button"
                       onClick={() => setQuestionFormat(fmt.id)}
-                      className={`p-2 rounded-xl border text-center text-[11px] font-medium transition-all ${
+                      className={`p-2 rounded-xl border text-center text-xs font-medium transition-all ${
                         questionFormat === fmt.id
                           ? 'bg-amber-500/15 border-amber-400/50 text-amber-300 font-semibold'
-                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-700'
                       }`}
                     >
                       {fmt.label}
@@ -252,9 +430,9 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
               {/* Controls */}
               <div className="grid grid-cols-2 gap-3 pt-1">
                 <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1">
-                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <div className="flex items-center justify-between text-xs text-zinc-300">
                     <span>Quantidade</span>
-                    <span className="font-mono text-zinc-100 font-bold">{questionCount}</span>
+                    <span className="font-mono text-zinc-100 font-bold tabular-nums">{questionCount}</span>
                   </div>
                   <input
                     type="range"
@@ -267,7 +445,7 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
                 </div>
 
                 <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1">
-                  <span className="text-xs text-zinc-400 block">Tempo limite</span>
+                  <span className="text-xs text-zinc-300 block">Tempo limite</span>
                   <select
                     value={timeLimit}
                     onChange={(e) => setTimeLimit(Number(e.target.value))}
@@ -286,14 +464,14 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-3.5 py-1.5 rounded-lg text-zinc-400 hover:text-white text-xs font-medium"
+                  className="min-h-[40px] px-3.5 py-1.5 rounded-xl text-zinc-300 hover:text-white text-xs font-medium"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 active:scale-98"
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 active:scale-98"
                 >
                   {isLoading ? (
                     <>
@@ -313,9 +491,11 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
             /* Preview */
             <div className="space-y-4">
               <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs space-y-1">
-                <div className="flex items-center justify-between text-zinc-400 text-[11px] font-mono">
+                <div className="flex items-center justify-between text-zinc-300 text-xs">
                   <span>{generatedResult.subject}</span>
-                  <span>{generatedResult.questions.length} perguntas</span>
+                  <span>
+                    <strong className="font-mono tabular-nums">{generatedResult.questions.length}</strong> perguntas
+                  </span>
                 </div>
                 <h4 className="font-semibold text-zinc-100">{generatedResult.title}</h4>
               </div>
@@ -329,13 +509,14 @@ export const AiQuizGenerator: React.FC<AiQuizGeneratorProps> = ({
                       className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2 text-xs"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-mono text-zinc-400 text-[11px]">
-                          #{idx + 1} · {meta?.label || q.type}
+                        <span className="text-zinc-300 text-xs">
+                          <strong className="font-mono tabular-nums">#{idx + 1}</strong> · {meta?.label || q.type}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleRemoveQuestion(idx)}
-                          className="text-zinc-500 hover:text-rose-400 p-1"
+                          aria-label={`Remover questão ${idx + 1}`}
+                          className="text-zinc-300 hover:text-rose-400 p-1.5 rounded-lg"
                         >
                           <Trash size={14} weight="regular" />
                         </button>

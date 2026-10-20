@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import QRCode from 'qrcode';
-import { Session, Quiz, Player, Answer, QuizReport, QuestionReportSummary } from '../types/quiz';
+import { Session, Quiz, Question, Player, Answer, QuizReport, QuestionReportSummary } from '../types/quiz';
 import {
   subscribeToSession,
   subscribeToPlayers,
@@ -8,9 +8,12 @@ import {
   updateSessionState,
   joinSessionAsPlayer,
   submitAnswer,
+  gradeAnswerAsHost,
+  getSessionPrivateQuestions,
   restartLiveSession,
 } from '../services/quizService';
 import { saveQuizReport } from '../services/reportService';
+import { resolveCurrentUid } from '../lib/firebase';
 import { soundEffects } from '../lib/soundEffects';
 import { LiveCharts } from '../components/LiveCharts';
 import { DataCloud } from '../components/DataCloud';
@@ -19,7 +22,7 @@ import {
   WaitingRoomIllustration,
   LeaderboardBadgeIllustration,
 } from '../components/BrandIllustrations';
-import { QUESTION_TYPES_META } from '../lib/quizHelpers';
+import { QUESTION_TYPES_META, checkAnswerCorrectness } from '../lib/quizHelpers';
 import {
   Users,
   Play,
@@ -41,6 +44,7 @@ import {
   SpeakerSlash,
   ArrowCounterClockwise,
   Trophy,
+  DotsThree,
 } from '@phosphor-icons/react';
 
 interface TelaoViewProps {
@@ -57,6 +61,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
   onNavigateToStudent,
 }) => {
   const [session, setSession] = useState<Session | null>(null);
+  const [privateQuestions, setPrivateQuestions] = useState<Question[] | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [allAnswersHistory, setAllAnswersHistory] = useState<Answer[]>([]);
@@ -67,10 +72,23 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
   const [joinUrl, setJoinUrl] = useState<string>('');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [isQrExpanded, setIsQrExpanded] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [isMuted, setIsMuted] = useState<boolean>(() => soundEffects.getMuted());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const closingRef = useRef(false);
   const reportSavedRef = useRef(false);
+  const gradedAnswerIdsRef = useRef<Set<string>>(new Set());
+
+  // Load full unredacted questions from private host subcollection
+  useEffect(() => {
+    if (!sessionId) return;
+    getSessionPrivateQuestions(sessionId).then((qs) => {
+      if (qs && qs.length > 0) {
+        setPrivateQuestions(qs);
+      }
+    });
+  }, [sessionId]);
 
   // Subscribe to Session
   useEffect(() => {
@@ -89,27 +107,77 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
   }, [sessionId]);
 
   const currentQuiz = quizzes.find((q) => q.id === session?.quizId) || quizzes[0];
-  const sessionQuestions = session?.questions?.length ? session.questions : currentQuiz?.questions || [];
+  const sessionQuestions = privateQuestions?.length
+    ? privateQuestions
+    : currentQuiz?.questions?.length
+    ? currentQuiz.questions
+    : session?.questions || [];
   const currentQuestionIndex = session?.currentQuestionIndex ?? 0;
   const currentQuestion = sessionQuestions[currentQuestionIndex];
   const totalQuestions = sessionQuestions.length || 1;
 
-  // Subscribe to Answers for current question
+  // Subscribe to Answers for current question and perform authoritative host grading
   useEffect(() => {
     if (!sessionId) return;
     const unsub = subscribeToAnswers(sessionId, currentQuestionIndex, (updated) => {
-      setAnswers(updated);
-      if (updated.length > 0) {
+      const processed = updated.map((ans) => {
+        if (!ans.gradedByHost && !gradedAnswerIdsRef.current.has(ans.id) && currentQuestion) {
+          gradedAnswerIdsRef.current.add(ans.id);
+          const isCorrect = checkAnswerCorrectness(currentQuestion, ans.answer);
+          const startedAt = session?.questionStartedAt || Date.now();
+          const elapsedMs = Math.max(500, Date.now() - startedAt);
+          const basePoints = currentQuestion.points ?? 1000;
+          const timeLimitMs = (session?.timeLimitSeconds || currentQuestion.timeLimit || 20) * 1000;
+          const speedRatio = Math.max(0.2, Math.min(1, (timeLimitMs - elapsedMs) / timeLimitMs));
+          const pointsAwarded =
+            isCorrect && basePoints > 0 ? Math.round(basePoints * (0.6 + 0.4 * speedRatio)) : 0;
+
+          gradeAnswerAsHost(
+            sessionId,
+            ans.id,
+            ans.playerId,
+            isCorrect,
+            pointsAwarded,
+            elapsedMs
+          ).catch((err) => console.warn('Host grading error:', err));
+
+          return {
+            ...ans,
+            isCorrect,
+            pointsAwarded,
+            timeSpentMs: elapsedMs,
+            gradedByHost: true,
+          };
+        }
+        return ans;
+      });
+
+      setAnswers(processed);
+      if (processed.length > 0) {
         setAllAnswersHistory((prev) => {
           const map = new Map<string, Answer>();
           prev.forEach((a) => map.set(a.id, a));
-          updated.forEach((a) => map.set(a.id, a));
+          processed.forEach((a) => map.set(a.id, a));
           return Array.from(map.values());
         });
       }
     });
     return () => unsub();
-  }, [sessionId, currentQuestionIndex]);
+  }, [
+    sessionId,
+    currentQuestionIndex,
+    currentQuestion,
+    session?.questionStartedAt,
+    session?.timeLimitSeconds,
+  ]);
+
+  const buildRankingSnapshot = useCallback(
+    () =>
+      [...players]
+        .sort((a, b) => b.score - a.score)
+        .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score, streak: p.streak })),
+    [players]
+  );
 
   const handleCloseQuestion = useCallback(async () => {
     if (closingRef.current) return;
@@ -119,31 +187,45 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       await updateSessionState(sessionId, {
         status: 'result',
         isAcceptingAnswers: false,
+        revealedQuestion: currentQuestion || null,
+        rankingSnapshot: buildRankingSnapshot(),
       });
     } finally {
       closingRef.current = false;
     }
-  }, [sessionId]);
+  }, [sessionId, currentQuestion, buildRankingSnapshot]);
 
-  // Timer countdown handler with sound warning on final seconds
+  // Keep rankingSnapshot updated on the result screen when final host grading writes settle
+  useEffect(() => {
+    if (session?.status === 'result' && players.length > 0) {
+      updateSessionState(sessionId, {
+        rankingSnapshot: buildRankingSnapshot(),
+      }).catch(() => {});
+    }
+  }, [session?.status, players, sessionId, buildRankingSnapshot]);
+
+  // Timer countdown handler anchored to questionStartedAt (resilient to reloads and background tabs)
   useEffect(() => {
     if (session?.status === 'question' && session.isAcceptingAnswers) {
       const limit = session.timeLimitSeconds || currentQuestion?.timeLimit || 20;
-      setTimeLeft(limit);
+      const startedAt = session.questionStartedAt || Date.now();
       closingRef.current = false;
+      let lastPlayedTick = -1;
 
       if (timerRef.current) clearInterval(timerRef.current);
 
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) return 0;
-          const next = prev - 1;
-          if (next <= 5 && next > 0) {
-            soundEffects.playUrgentTick();
-          }
-          return next;
-        });
-      }, 1000);
+      const updateRemaining = () => {
+        const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+        const next = Math.max(0, limit - elapsedSec);
+        setTimeLeft(next);
+        if (next <= 5 && next > 0 && next !== lastPlayedTick) {
+          lastPlayedTick = next;
+          soundEffects.playUrgentTick();
+        }
+      };
+
+      updateRemaining();
+      timerRef.current = setInterval(updateRemaining, 250);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
@@ -151,7 +233,14 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [session?.status, session?.currentQuestionIndex, session?.isAcceptingAnswers]);
+  }, [
+    session?.status,
+    session?.currentQuestionIndex,
+    session?.isAcceptingAnswers,
+    session?.questionStartedAt,
+    session?.timeLimitSeconds,
+    currentQuestion?.timeLimit,
+  ]);
 
   // Close question automatically when timer hits 0
   useEffect(() => {
@@ -203,7 +292,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       });
 
       const rep = await saveQuizReport({
-        teacherId: session.hostId || 'prof_local',
+        teacherId: session.hostId || resolveCurrentUid(),
         sessionId: session.id,
         quizId: session.quizId || currentQuiz?.id || 'custom_quiz',
         quizTitle: session.quizTitle || currentQuiz?.title || 'Quiz',
@@ -238,14 +327,10 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       isAcceptingAnswers: true,
       timeLimitSeconds: currentQuestion.timeLimit,
       questionStartedAt: Date.now(),
+      revealedQuestion: null,
       rankingSnapshot: [],
     });
   };
-
-  const buildRankingSnapshot = () =>
-    [...players]
-      .sort((a, b) => b.score - a.score)
-      .map((p) => ({ id: p.id, nickname: p.nickname, score: p.score }));
 
   const handleShowLeaderboard = async () => {
     await updateSessionState(sessionId, {
@@ -265,6 +350,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
         isAcceptingAnswers: true,
         timeLimitSeconds: nextQ.timeLimit,
         questionStartedAt: Date.now(),
+        revealedQuestion: null,
         rankingSnapshot: [],
       });
     } else {
@@ -279,6 +365,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
 
   const handleRestart = async (startImmediately = false) => {
     reportSavedRef.current = false;
+    gradedAnswerIdsRef.current.clear();
     setConsolidatedReport(null);
     setAllAnswersHistory([]);
     setAnswers([]);
@@ -410,23 +497,15 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       }
 
       const timeSpent = Math.floor(1500 + Math.random() * 5000);
-      const points = isCorrect ? Math.round((currentQuestion.points || 1000) * 0.85) : 0;
 
-      await submitAnswer(
+      await submitAnswer(sessionId, {
         sessionId,
-        {
-          sessionId,
-          questionIndex: currentQuestionIndex,
-          playerId: p.id,
-          playerNickname: p.nickname,
-          answer: answerVal,
-          isCorrect,
-          pointsAwarded: points,
-          timeSpentMs: timeSpent,
-        },
-        p.score,
-        p.streak
-      );
+        questionIndex: currentQuestionIndex,
+        playerId: p.id,
+        playerNickname: p.nickname,
+        answer: answerVal,
+        timeSpentMs: timeSpent,
+      });
     }
   };
 
@@ -549,103 +628,288 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
   const questionMeta = currentQuestion ? QUESTION_TYPES_META[currentQuestion.type] : null;
   const QuestionTypeIcon = questionMeta?.icon;
 
+  // Shared top bar controls: only Sound, "⋯" menu, and Encerrar (with confirmation)
+  const renderTopControls = (leftContent: React.ReactNode, extraRightBadge?: React.ReactNode) => (
+    <div className="flex items-center justify-between gap-2 text-xs text-zinc-300 relative">
+      <div className="flex items-center gap-2 min-w-0">{leftContent}</div>
+
+      <div className="flex items-center gap-1.5 shrink-0">
+        {extraRightBadge}
+
+        {/* Som (Mute/Unmute) */}
+        <button
+          type="button"
+          onClick={handleToggleSound}
+          aria-label={isMuted ? 'Ativar efeitos sonoros' : 'Silenciar efeitos sonoros'}
+          title={isMuted ? 'Ativar efeitos sonoros (M)' : 'Silenciar áudio (M)'}
+          className={`min-w-[44px] min-h-[44px] p-2 rounded-xl border transition-colors flex items-center justify-center ${
+            isMuted
+              ? 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+              : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-zinc-850'
+          }`}
+        >
+          {isMuted ? <SpeakerSlash size={16} weight="bold" /> : <SpeakerHigh size={16} weight="bold" />}
+        </button>
+
+        {/* Menu "⋯" com ações secundárias */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setIsMoreMenuOpen((v) => !v)}
+            aria-label="Mais opções do telão"
+            title="Mais opções"
+            className="min-w-[44px] min-h-[44px] p-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-200 hover:text-white transition-colors flex items-center justify-center"
+          >
+            <DotsThree size={20} weight="bold" />
+          </button>
+
+          {isMoreMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setIsMoreMenuOpen(false)}
+              />
+              <div className="absolute right-0 mt-2 w-56 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl py-1.5 z-50 text-xs text-zinc-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    setIsQrExpanded(true);
+                  }}
+                  className="w-full min-h-[44px] px-4 py-2.5 text-left hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
+                >
+                  <QrCode size={16} weight="bold" className="text-sky-400" />
+                  <span>Exibir QR Code / PIN ({session.pin})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    toggleFullscreen();
+                  }}
+                  className="w-full min-h-[44px] px-4 py-2.5 text-left hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
+                >
+                  <ArrowsOut size={16} weight="bold" className="text-zinc-300" />
+                  <span>Alternar Tela Cheia (F)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    onNavigateToStudent();
+                  }}
+                  className="w-full min-h-[44px] px-4 py-2.5 text-left hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
+                >
+                  <DeviceMobile size={16} weight="bold" className="text-zinc-300" />
+                  <span>Simular Visão do Aluno</span>
+                </button>
+
+                {session.status !== 'lobby' && (
+                  <>
+                    <div className="my-1 border-t border-zinc-800" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        handleRestart(false);
+                      }}
+                      className="w-full min-h-[44px] px-4 py-2.5 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-amber-300 transition-colors"
+                    >
+                      <ArrowCounterClockwise size={16} weight="bold" />
+                      <span>Recomeçar do Início</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        handleJumpToPodium();
+                      }}
+                      className="w-full min-h-[44px] px-4 py-2.5 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-amber-300 transition-colors"
+                    >
+                      <Trophy size={16} weight="bold" />
+                      <span>Ir Direto para o Pódio</span>
+                    </button>
+                  </>
+                )}
+
+                {session.status === 'question' && players.length > 0 && answers.length < players.length && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMoreMenuOpen(false);
+                      handleSimulateAnswers();
+                    }}
+                    className="w-full min-h-[44px] px-4 py-2.5 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-300 transition-colors"
+                  >
+                    <Robot size={16} weight="bold" />
+                    <span>Simular Votos de Teste</span>
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Botão Encerrar (abre confirmação) */}
+        <button
+          type="button"
+          onClick={() => setShowEndConfirm(true)}
+          aria-label="Encerrar apresentação"
+          className="min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-rose-950/50 border border-zinc-800 hover:border-rose-500/40 text-zinc-300 hover:text-rose-300 text-xs font-semibold transition-colors flex items-center gap-1.5"
+        >
+          <SignOut size={15} weight="bold" />
+          <span>Encerrar</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  // Modal de confirmação ao encerrar sala
+  const renderModals = () => (
+    <>
+      {showEndConfirm && (
+        <div
+          onClick={() => setShowEndConfirm(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl text-left"
+          >
+            <h3 className="text-base font-bold text-zinc-100 font-display">
+              Encerrar esta apresentação?
+            </h3>
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              A sala ao vivo (PIN {session.pin}) será fechada para os alunos e o relatório da turma será salvo.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowEndConfirm(false)}
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-xs font-semibold transition-colors"
+              >
+                Continuar Aula
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEndConfirm(false);
+                  handleEndSessionAndExit();
+                }}
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-zinc-950 text-xs font-bold transition-colors"
+              >
+                Sim, Encerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isQrExpanded && qrDataUrl && (
+        <div
+          onClick={() => setIsQrExpanded(false)}
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sm:p-8 max-w-md w-full text-center space-y-5 shadow-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-zinc-300">
+                Acesso Rápido por Câmera
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsQrExpanded(false)}
+                aria-label="Fechar QR Code ampliado"
+                className="min-w-[44px] min-h-[44px] p-2 rounded-xl text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors flex items-center justify-center"
+              >
+                <X size={18} weight="bold" />
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white inline-block mx-auto shadow-lg">
+              <img
+                src={qrDataUrl}
+                alt={`QR Code ${session.pin}`}
+                className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-xs text-zinc-300 font-medium block">
+                Código PIN
+              </span>
+              <div className="telao-pin text-white tabular-nums whitespace-nowrap">
+                {`${session.pin.slice(0, 3)}\u00A0${session.pin.slice(3)}`}
+              </div>
+              <p className="text-xs text-zinc-300 font-mono pt-1 break-all">{joinUrl}</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   // 1. LOBBY VIEW
   if (session.status === 'lobby') {
     return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 min-h-[85vh] flex flex-col justify-between">
-        {/* Minimal Control Bar */}
-        <div className="flex items-center justify-between text-xs text-zinc-400">
-          <div className="flex items-center gap-2.5">
-            <span className="font-bold text-zinc-100 text-sm">{session.quizTitle}</span>
-            <span className="text-zinc-500 font-mono text-[11px] bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-32 space-y-6 min-h-[82vh] flex flex-col justify-between">
+        {renderTopControls(
+          <>
+            <span className="font-bold text-zinc-100 text-sm truncate">{session.quizTitle}</span>
+            <span className="text-zinc-300 font-mono text-xs bg-zinc-900 px-2.5 py-1 rounded-lg border border-zinc-800 shrink-0 tabular-nums">
               {totalQuestions} {totalQuestions === 1 ? 'questão' : 'questões'}
             </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Audio Mute/Unmute Toggle */}
-            <button
-              onClick={handleToggleSound}
-              className={`p-2 rounded-xl border transition-colors ${
-                isMuted
-                  ? 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-                  : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-zinc-850'
-              }`}
-              title={isMuted ? 'Ativar efeitos sonoros (M)' : 'Silenciar áudio (M)'}
-            >
-              {isMuted ? <SpeakerSlash size={15} weight="bold" /> : <SpeakerHigh size={15} weight="bold" />}
-            </button>
-
-            <button
-              onClick={onNavigateToStudent}
-              className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-medium transition-colors flex items-center gap-1.5"
-              title="Abrir simulador de aluno"
-            >
-              <DeviceMobile size={14} weight="regular" />
-              <span className="hidden sm:inline">Visão do Aluno</span>
-            </button>
-
-            <button
-              onClick={toggleFullscreen}
-              className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
-              title="Tela cheia (F)"
-            >
-              <ArrowsOut size={15} weight="bold" />
-            </button>
-
-            <button
-              onClick={handleEndSessionAndExit}
-              className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 text-xs font-medium transition-colors flex items-center gap-1.5"
-              title="Encerrar sala"
-            >
-              <SignOut size={14} weight="bold" />
-              <span>Encerrar</span>
-            </button>
-          </div>
-        </div>
+          </>
+        )}
 
         {/* Bento Grid Lobby */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 my-auto">
           {/* Bento Cell: QR Code + PIN Billboard (3 cols) */}
-          <div className="md:col-span-3 p-6 sm:p-8 rounded-3xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col justify-between space-y-6">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-6 my-auto">
+          <div className="md:col-span-3 p-6 sm:p-8 rounded-2xl bg-zinc-900/55 border border-zinc-800/80 flex flex-col justify-between space-y-6">
+            <div className="flex flex-col lg:flex-row items-center justify-between gap-6 my-auto">
               {/* QR Code Column */}
               {qrDataUrl && (
                 <div className="flex flex-col items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setIsQrExpanded(true)}
+                    aria-label="Ampliar QR Code na tela inteira"
                     title="Clique para ampliar o QR Code na tela inteira"
-                    className="p-3 rounded-2xl bg-white shadow-md hover:scale-[1.03] active:scale-[0.99] transition-transform cursor-pointer group relative"
+                    className="p-3 rounded-2xl bg-white shadow-md hover:scale-[1.02] active:scale-[0.99] transition-transform cursor-pointer group relative"
                   >
                     <img
                       src={qrDataUrl}
                       alt={`QR Code PIN ${session.pin}`}
                       className="w-36 h-36 sm:w-40 sm:h-40 object-contain"
                     />
-                    <span className="absolute inset-x-2 bottom-1.5 py-0.5 rounded bg-zinc-950/85 text-[10px] font-mono text-zinc-100 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="absolute inset-x-2 bottom-1.5 py-0.5 rounded bg-zinc-950/90 text-[11px] font-medium text-zinc-100 opacity-0 group-hover:opacity-100 transition-opacity">
                       Ampliar QR
                     </span>
                   </button>
-                  <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider flex items-center gap-1">
-                    <QrCode size={12} weight="bold" />
+                  <span className="text-xs text-zinc-300 font-medium flex items-center gap-1">
+                    <QrCode size={14} weight="bold" />
                     <span>Aponte a câmera</span>
                   </span>
                 </div>
               )}
 
               {/* PIN Billboard Column */}
-              <div className="flex-1 flex flex-col items-center sm:items-start text-center sm:text-left space-y-3">
-                <span className="text-[11px] uppercase tracking-widest text-zinc-500 font-mono font-semibold">
-                  Código PIN de Acesso Direto
+              <div className="flex-1 flex flex-col items-center lg:items-start text-center lg:text-left space-y-3 min-w-0">
+                <span className="text-xs text-zinc-300 font-medium">
+                  Código PIN de acesso
                 </span>
 
-                <div className="telao-pin text-zinc-100 tabular-nums select-all">
-                  {session.pin.slice(0, 3)} {session.pin.slice(3)}
+                <div className="telao-pin text-white tabular-nums whitespace-nowrap">
+                  {`${session.pin.slice(0, 3)}\u00A0${session.pin.slice(3)}`}
                 </div>
 
-                <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed max-w-xs">
-                  Escaneie o QR Code para entrar sem digitar ou informe o código PIN na aba Aluno.
+                <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed max-w-xs">
+                  Escaneie o QR Code ou digite o PIN no celular para entrar.
                 </p>
 
                 {/* Action Pills: Copy PIN & Copy Direct Link */}
@@ -653,16 +917,16 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
                   <button
                     type="button"
                     onClick={copyPin}
-                    className="px-3 py-1.5 rounded-xl bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 text-xs font-medium flex items-center gap-1.5 transition-colors"
+                    className="min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-850 hover:bg-zinc-800 text-zinc-100 border border-zinc-750 text-xs font-semibold flex items-center gap-1.5 transition-colors"
                   >
                     {copiedPin ? (
                       <>
                         <Check size={14} weight="bold" className="text-emerald-400" />
-                        <span className="text-emerald-400">PIN Copiado</span>
+                        <span className="text-emerald-300">PIN Copiado</span>
                       </>
                     ) : (
                       <>
-                        <Copy size={14} weight="bold" className="text-zinc-400" />
+                        <Copy size={14} weight="bold" className="text-zinc-300" />
                         <span>Copiar PIN</span>
                       </>
                     )}
@@ -671,17 +935,17 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
                   <button
                     type="button"
                     onClick={copyDirectLink}
-                    className="px-3 py-1.5 rounded-xl bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 text-xs font-medium flex items-center gap-1.5 transition-colors"
+                    className="min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-850 hover:bg-zinc-800 text-zinc-100 border border-zinc-750 text-xs font-semibold flex items-center gap-1.5 transition-colors"
                   >
                     {copiedLink ? (
                       <>
                         <Check size={14} weight="bold" className="text-emerald-400" />
-                        <span className="text-emerald-400">Link Copiado</span>
+                        <span className="text-emerald-300">Link Copiado</span>
                       </>
                     ) : (
                       <>
-                        <LinkSimple size={14} weight="bold" className="text-zinc-400" />
-                        <span>Copiar Link Direto</span>
+                        <LinkSimple size={14} weight="bold" className="text-zinc-300" />
+                        <span>Copiar Link</span>
                       </>
                     )}
                   </button>
@@ -689,14 +953,13 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
               </div>
             </div>
 
-            {/* Footer Link Bar */}
             {joinUrl && (
-              <div className="pt-3 border-t border-zinc-800/60 flex items-center justify-between text-[11px] font-mono text-zinc-500 gap-2">
+              <div className="pt-3 border-t border-zinc-800/70 flex items-center justify-between text-xs font-mono text-zinc-300 gap-2">
                 <span className="truncate">{joinUrl}</span>
                 <button
                   type="button"
                   onClick={() => setIsQrExpanded(true)}
-                  className="text-zinc-400 hover:text-zinc-200 shrink-0 underline underline-offset-2"
+                  className="text-zinc-200 hover:text-white shrink-0 underline underline-offset-2 font-sans font-medium"
                 >
                   Expandir QR
                 </button>
@@ -705,27 +968,27 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
           </div>
 
           {/* Bento Cell: Connected Students (2 cols) */}
-          <div className="md:col-span-2 p-6 rounded-3xl bg-zinc-900/50 border border-zinc-800/80 flex flex-col justify-between space-y-4">
+          <div className="md:col-span-2 p-6 rounded-2xl bg-zinc-900/55 border border-zinc-800/80 flex flex-col justify-between space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800/60 text-xs">
-              <div className="flex items-center gap-2 text-zinc-200 font-semibold">
-                <Users size={16} weight="regular" className="text-zinc-400" />
+              <div className="flex items-center gap-2 text-zinc-100 font-semibold">
+                <Users size={16} weight="regular" className="text-zinc-300" />
                 <span>Participantes Conectados</span>
               </div>
-              <span className="font-mono text-zinc-100 font-bold bg-zinc-850 px-2.5 py-0.5 rounded-md border border-zinc-800 tabular-nums">
+              <span className="font-mono text-zinc-100 font-bold bg-zinc-850 px-2.5 py-0.5 rounded-md border border-zinc-750 tabular-nums">
                 {players.length}
               </span>
             </div>
 
             {players.length === 0 ? (
-              <div className="py-4 text-center space-y-2.5 my-auto">
-                <WaitingRoomIllustration className="w-28 h-20 mx-auto" />
-                <p className="text-zinc-400 text-xs font-medium">
+              <div className="py-4 text-center space-y-3 my-auto">
+                <WaitingRoomIllustration className="w-24 h-18 mx-auto" />
+                <p className="text-zinc-300 text-xs font-medium">
                   Aguardando a turma entrar na sala...
                 </p>
                 <button
                   type="button"
                   onClick={handleAddTestStudents}
-                  className="px-3.5 py-1.5 rounded-xl bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+                  className="min-h-[44px] px-3.5 py-2 rounded-xl bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
                 >
                   <UserPlus size={14} weight="bold" />
                   <span>Adicionar 5 alunos de teste</span>
@@ -736,7 +999,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
                 {players.map((p) => (
                   <div
                     key={p.id}
-                    className="px-3 py-1 rounded-xl bg-zinc-850 border border-zinc-750 text-zinc-200 text-xs font-medium flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-xl bg-zinc-850 border border-zinc-750 text-zinc-100 text-xs font-medium flex items-center gap-1.5"
                   >
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                     <span>{p.nickname}</span>
@@ -749,7 +1012,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
               <button
                 type="button"
                 onClick={handleAddTestStudents}
-                className="text-[11px] text-zinc-500 hover:text-zinc-300 text-center transition-colors pt-2 font-mono"
+                className="min-h-[36px] text-xs text-zinc-300 hover:text-white text-center transition-colors pt-1"
               >
                 + Adicionar alunos de teste
               </button>
@@ -757,64 +1020,26 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
           </div>
         </div>
 
-        {/* Minimal Launch Action */}
-        <div className="text-center space-y-2 pt-2">
-          <button
-            onClick={handleStartQuiz}
-            disabled={players.length === 0}
-            className="px-8 py-3.5 rounded-2xl bg-amber-400 hover:bg-amber-300 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-950 font-display font-extrabold text-base shadow-sm transition-all flex items-center gap-2.5 mx-auto active:scale-[0.98]"
-          >
-            <Play size={16} weight="fill" />
-            <span>Tá Valendo! Iniciar Rodada</span>
-          </button>
-          <span className="text-[10px] font-mono text-zinc-500 block">
-            Atalhos: Espaço/Seta para avançar · M para áudio · F para tela cheia
-          </span>
+        {/* Botão Iniciar Rodada fixo na base (sempre visível sem precisar rolar) */}
+        <div className="fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="max-w-xl mx-auto space-y-1.5 text-center">
+            <button
+              type="button"
+              onClick={handleStartQuiz}
+              disabled={players.length === 0}
+              className="w-full min-h-[52px] py-3.5 px-6 rounded-2xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-display font-extrabold text-base shadow-md transition-all flex items-center justify-center gap-2.5 active:scale-[0.99]"
+            >
+              <Play size={18} weight="fill" />
+              <span>Iniciar Rodada</span>
+            </button>
+            {/* Oculto em telas pequenas/toque */}
+            <span className="hidden lg:block text-xs text-zinc-400">
+              Atalhos de teclado: Espaço ou Seta (avançar) · M (som) · F (tela cheia)
+            </span>
+          </div>
         </div>
 
-        {/* Expanded QR Code Modal */}
-        {isQrExpanded && qrDataUrl && (
-          <div
-            onClick={() => setIsQrExpanded(false)}
-            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="bg-zinc-900 border border-zinc-800 rounded-3xl p-8 max-w-lg w-full text-center space-y-5 shadow-2xl"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-400 font-semibold">
-                  Acesso Rápido por Câmera
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsQrExpanded(false)}
-                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-                >
-                  <X size={18} weight="bold" />
-                </button>
-              </div>
-
-              <div className="p-5 rounded-3xl bg-white inline-block mx-auto shadow-lg">
-                <img
-                  src={qrDataUrl}
-                  alt={`QR Code ${session.pin}`}
-                  className="w-72 h-72 sm:w-80 sm:h-80 object-contain"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <span className="text-[11px] font-mono uppercase tracking-widest text-zinc-500 block">
-                  Código PIN
-                </span>
-                <div className="telao-pin text-zinc-100 tabular-nums">
-                  {session.pin.slice(0, 3)} {session.pin.slice(3)}
-                </div>
-                <p className="text-xs text-zinc-400 font-mono pt-1 break-all">{joinUrl}</p>
-              </div>
-            </div>
-          </div>
-        )}
+        {renderModals()}
       </div>
     );
   }
@@ -827,116 +1052,26 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
     const allAnswered = players.length > 0 && answeredCount >= players.length;
 
     return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6 min-h-[85vh] flex flex-col justify-between">
-        {/* Top bar */}
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="font-mono font-bold text-zinc-200 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-lg tabular-nums">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-32 space-y-6 min-h-[82vh] flex flex-col justify-between">
+        {renderTopControls(
+          <>
+            <span className="font-mono font-bold text-zinc-100 bg-zinc-900 border border-zinc-800 px-2.5 py-1.5 rounded-xl tabular-nums">
               {currentQuestionIndex + 1}/{totalQuestions}
             </span>
             {questionMeta && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900/60 border border-zinc-800/80 text-zinc-300 font-medium">
-                {QuestionTypeIcon && <QuestionTypeIcon size={13} weight="bold" className="text-amber-400" />}
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-zinc-900/70 border border-zinc-800 text-zinc-200 font-medium">
+                {QuestionTypeIcon && <QuestionTypeIcon size={14} weight="bold" className="text-amber-400" />}
                 <span>{questionMeta.label}</span>
               </span>
             )}
-
-            {/* Late arrival PIN / QR shortcut */}
-            <button
-              type="button"
-              onClick={() => setIsQrExpanded(true)}
-              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-900/60 border border-zinc-800/80 text-[11px] font-mono text-zinc-400 hover:text-white"
-              title="Exibir QR Code para aluno retardatário"
-            >
-              <QrCode size={13} weight="bold" />
-              <span>PIN {session.pin}</span>
-            </button>
+          </>,
+          <div className="flex items-center gap-1.5 bg-zinc-900 px-3 py-2 rounded-xl border border-zinc-800 text-xs font-mono text-zinc-200 min-h-[44px]">
+            <Users size={15} weight="regular" className="text-zinc-300" />
+            <span className="text-zinc-100 font-bold tabular-nums">
+              {answeredCount}/{players.length}
+            </span>
           </div>
-
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            {/* Audio Toggle */}
-            <button
-              onClick={handleToggleSound}
-              className={`p-1.5 rounded-lg border transition-colors ${
-                isMuted
-                  ? 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-                  : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-zinc-850'
-              }`}
-              title={isMuted ? 'Ativar sons' : 'Silenciar sons'}
-            >
-              {isMuted ? <SpeakerSlash size={14} weight="bold" /> : <SpeakerHigh size={14} weight="bold" />}
-            </button>
-
-            <button
-              onClick={toggleFullscreen}
-              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
-              title="Tela cheia"
-            >
-              <ArrowsOut size={14} weight="bold" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleRestart(false)}
-              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Recomeçar quiz do início (mantendo os alunos conectados)"
-            >
-              <ArrowCounterClockwise size={13} weight="bold" />
-              <span className="hidden md:inline">Recomeçar</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleJumpToPodium}
-              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Finalizar perguntas e ir direto para o Pódio Final"
-            >
-              <Trophy size={13} weight="bold" />
-              <span className="hidden md:inline">Pódio</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleEndSessionAndExit}
-              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Encerrar apresentação e voltar ao painel"
-            >
-              <SignOut size={13} weight="bold" />
-              <span className="hidden sm:inline">Encerrar</span>
-            </button>
-
-            <div className="flex items-center gap-1.5 bg-zinc-900/70 px-3 py-1 rounded-lg border border-zinc-800 text-xs font-mono text-zinc-400">
-              <Users size={14} weight="regular" />
-              <span className="text-zinc-100 font-bold tabular-nums">
-                {answeredCount}/{players.length}
-              </span>
-            </div>
-
-            {players.length > 0 && answeredCount < players.length && (
-              <button
-                type="button"
-                onClick={handleSimulateAnswers}
-                className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition-colors flex items-center gap-1.5 border border-zinc-800"
-                title="Simular respostas dos alunos de teste"
-              >
-                <Robot size={14} weight="bold" />
-                <span className="hidden lg:inline">Simular Votos</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleCloseQuestion}
-              className={`px-3.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                allAnswered
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-sm'
-                  : 'bg-zinc-800 hover:bg-zinc-750 text-zinc-100 border border-zinc-700'
-              }`}
-            >
-              <span>Revelar Resultado</span>
-              <ArrowRight size={13} weight="bold" />
-            </button>
-          </div>
-        </div>
+        )}
 
         {/* Question Prompt */}
         <div className="text-center space-y-4 py-2">
@@ -949,10 +1084,10 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
             <div
               className={`w-16 h-16 rounded-full border-2 flex items-center justify-center font-bold text-2xl font-mono tabular-nums transition-colors ${
                 timeLeft <= 5
-                  ? 'border-rose-500 text-rose-400 bg-rose-950/25 animate-pulse'
+                  ? 'border-rose-500 text-rose-300 bg-rose-950/35'
                   : timeLeft <= 10
-                  ? 'border-amber-500 text-amber-400 bg-amber-950/25'
-                  : 'border-zinc-700 text-zinc-100 bg-zinc-900/50'
+                  ? 'border-amber-500 text-amber-300 bg-amber-950/35'
+                  : 'border-zinc-700 text-zinc-100 bg-zinc-900/60'
               }`}
             >
               {timeLeft}
@@ -966,52 +1101,32 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
         </div>
 
         {/* Progress Line */}
-        <div className="w-full bg-zinc-900 h-1.5 rounded-full overflow-hidden">
+        <div className="w-full bg-zinc-900 h-2 rounded-full overflow-hidden">
           <div
-            className="h-full bg-zinc-300 transition-all duration-1000 ease-linear"
+            className="h-full bg-zinc-200 transition-all duration-1000 ease-linear"
             style={{ width: `${progressPct}%` }}
           />
         </div>
 
-        {/* QR Code Popup */}
-        {isQrExpanded && qrDataUrl && (
-          <div
-            onClick={() => setIsQrExpanded(false)}
-            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl"
+        {/* Botão "Revelar Resultado" fixo na parte inferior (nunca atrás do header) */}
+        <div className="fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="max-w-xl mx-auto">
+            <button
+              type="button"
+              onClick={handleCloseQuestion}
+              className={`w-full min-h-[52px] py-3.5 px-6 rounded-2xl font-display font-extrabold text-base shadow-md transition-all flex items-center justify-center gap-2 active:scale-[0.99] ${
+                allAnswered
+                  ? 'bg-emerald-400 hover:bg-emerald-300 text-zinc-950'
+                  : 'bg-amber-400 hover:bg-amber-300 text-zinc-950'
+              }`}
             >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-widest text-zinc-400 font-semibold">
-                  Acesso de Aluno Retardatário
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsQrExpanded(false)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-white"
-                >
-                  <X size={16} weight="bold" />
-                </button>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-white inline-block mx-auto">
-                <img
-                  src={qrDataUrl}
-                  alt={`QR Code PIN ${session.pin}`}
-                  className="w-56 h-56 object-contain"
-                />
-              </div>
-
-              <div>
-                <span className="text-xl font-bold font-mono text-zinc-100">
-                  PIN: {session.pin.slice(0, 3)} {session.pin.slice(3)}
-                </span>
-              </div>
-            </div>
+              <span>Revelar Resultado</span>
+              <ArrowRight size={18} weight="bold" />
+            </button>
           </div>
-        )}
+        </div>
+
+        {renderModals()}
       </div>
     );
   }
@@ -1025,89 +1140,36 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
       currentQuestion.type !== 'short_answer';
 
     return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6 min-h-[85vh] flex flex-col justify-between">
-        {/* Header */}
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-2">
-            <span className="font-mono font-bold text-zinc-300 bg-zinc-900 px-2.5 py-1 rounded-lg border border-zinc-800">
-              Resultado #{currentQuestionIndex + 1}
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-32 space-y-6 min-h-[82vh] flex flex-col justify-between">
+        {renderTopControls(
+          <>
+            <span className="font-mono font-bold text-zinc-100 bg-zinc-900 px-3 py-1.5 rounded-xl border border-zinc-800 tabular-nums">
+              Resultado {currentQuestionIndex + 1}/{totalQuestions}
             </span>
             {questionMeta && (
-              <span className="text-zinc-400 font-medium hidden sm:inline">
+              <span className="text-zinc-300 font-medium hidden sm:inline">
                 {questionMeta.label}
               </span>
             )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            <button
-              onClick={handleToggleSound}
-              className={`p-1.5 rounded-lg border transition-colors ${
-                isMuted
-                  ? 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-                  : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-zinc-850'
-              }`}
-              title={isMuted ? 'Ativar sons' : 'Silenciar sons'}
-            >
-              {isMuted ? <SpeakerSlash size={14} weight="bold" /> : <SpeakerHigh size={14} weight="bold" />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleRestart(false)}
-              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Recomeçar quiz do início (mantendo os alunos conectados)"
-            >
-              <ArrowCounterClockwise size={13} weight="bold" />
-              <span className="hidden md:inline">Recomeçar</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleJumpToPodium}
-              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Finalizar perguntas e ir direto para o Pódio Final"
-            >
-              <Trophy size={13} weight="bold" />
-              <span className="hidden md:inline">Pódio</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleEndSessionAndExit}
-              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Encerrar apresentação e voltar ao painel"
-            >
-              <SignOut size={13} weight="bold" />
-              <span className="hidden sm:inline">Encerrar</span>
-            </button>
-
-            <button
-              onClick={handleShowLeaderboard}
-              className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 active:scale-[0.98]"
-            >
-              <span>Classificação</span>
-              <ArrowRight size={14} weight="bold" />
-            </button>
-          </div>
-        </div>
+          </>
+        )}
 
         {/* Question Statement & Answer Highlight */}
-        <div className="text-center space-y-2.5">
-          <h2 className="text-xl sm:text-2xl font-bold text-zinc-100 max-w-3xl mx-auto leading-snug">
+        <div className="text-center space-y-3">
+          <h2 className="telao-question text-zinc-100 max-w-4xl mx-auto">
             {currentQuestion.question}
           </h2>
 
           {showTopCorrectBadge && (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-500/40 text-xs sm:text-sm font-semibold text-emerald-300">
-              <CheckCircle size={16} weight="fill" className="text-emerald-400" />
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-950/50 border border-emerald-500/45 text-sm sm:text-base font-bold text-emerald-300">
+              <CheckCircle size={18} weight="fill" className="text-emerald-400" />
               <span>Gabarito: {currentQuestion.correctAnswer}</span>
             </div>
           )}
 
           {isOpinion && (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-medium text-zinc-300">
-              <CheckCircle size={15} weight="fill" className="text-zinc-400" />
+            <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs sm:text-sm font-medium text-zinc-200">
+              <CheckCircle size={16} weight="fill" className="text-zinc-300" />
               <span>Sondagem e Participação da Turma</span>
             </div>
           )}
@@ -1120,8 +1182,8 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
 
         {/* Concise Pedagogical Explanation */}
         {currentQuestion.explanation && (
-          <div className="max-w-4xl mx-auto w-full p-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 text-xs text-zinc-300 flex items-start gap-2.5">
-            <Lightbulb size={17} weight="duotone" className="text-amber-400 shrink-0 mt-0.5" />
+          <div className="max-w-4xl mx-auto w-full p-4 sm:p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800 text-sm sm:text-base text-zinc-200 flex items-start gap-3">
+            <Lightbulb size={20} weight="duotone" className="text-amber-400 shrink-0 mt-0.5" />
             <p className="leading-relaxed">{currentQuestion.explanation}</p>
           </div>
         )}
@@ -1130,6 +1192,22 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
         <div className="w-full">
           <DataCloud question={currentQuestion} answers={answers} totalPlayers={players.length} />
         </div>
+
+        {/* Botão dominante "Classificação →" fixo na parte inferior */}
+        <div className="fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="max-w-xl mx-auto">
+            <button
+              type="button"
+              onClick={handleShowLeaderboard}
+              className="w-full min-h-[52px] py-3.5 px-6 rounded-2xl bg-amber-400 hover:bg-amber-300 text-zinc-950 font-display font-extrabold text-base shadow-md transition-all flex items-center justify-center gap-2 active:scale-[0.99]"
+            >
+              <span>Classificação</span>
+              <ArrowRight size={18} weight="bold" />
+            </button>
+          </div>
+        </div>
+
+        {renderModals()}
       </div>
     );
   }
@@ -1141,54 +1219,20 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
     const isLastQuestion = currentQuestionIndex + 1 >= totalQuestions;
 
     return (
-      <div className="max-w-2xl mx-auto px-4 py-8 space-y-6 min-h-[85vh] flex flex-col justify-between">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-3.5">
-            <LeaderboardBadgeIllustration className="w-16 h-16 shrink-0" />
-            <div className="space-y-0.5">
-              <span className="text-xs font-mono text-amber-400 uppercase tracking-widest font-semibold block">
-                Parcial da Rodada · {currentQuestionIndex + 1}/{totalQuestions}
+      <div className="max-w-2xl mx-auto px-4 pt-6 pb-32 space-y-6 min-h-[82vh] flex flex-col justify-between">
+        {renderTopControls(
+          <div className="flex items-center gap-3">
+            <LeaderboardBadgeIllustration className="w-12 h-12 shrink-0" />
+            <div>
+              <span className="text-xs text-amber-300 font-medium block">
+                Parcial da Rodada · <span className="font-mono">{currentQuestionIndex + 1}/{totalQuestions}</span>
               </span>
-              <h2 className="text-xl sm:text-2xl font-extrabold text-zinc-100 font-display">
+              <h2 className="text-lg sm:text-xl font-extrabold text-zinc-100 font-display">
                 Classificação da Turma
               </h2>
             </div>
           </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleToggleSound}
-              className={`p-1.5 rounded-lg border transition-colors ${
-                isMuted
-                  ? 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-                  : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-zinc-850'
-              }`}
-              title={isMuted ? 'Ativar sons' : 'Silenciar sons'}
-            >
-              {isMuted ? <SpeakerSlash size={14} weight="bold" /> : <SpeakerHigh size={14} weight="bold" />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleRestart(false)}
-              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-amber-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Recomeçar quiz do início (mantendo os alunos conectados)"
-            >
-              <ArrowCounterClockwise size={13} weight="bold" />
-              <span className="hidden sm:inline">Recomeçar</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleEndSessionAndExit}
-              className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/30 text-zinc-400 hover:text-rose-300 text-xs font-medium transition-colors flex items-center gap-1"
-              title="Encerrar apresentação e voltar ao painel"
-            >
-              <SignOut size={13} weight="bold" />
-              <span className="hidden sm:inline">Encerrar</span>
-            </button>
-          </div>
-        </div>
+        )}
 
         {/* Clean Ranking List */}
         <div className="space-y-2.5 my-auto">
@@ -1198,7 +1242,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
               className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${
                 idx === 0
                   ? 'bg-zinc-850 border-zinc-700 shadow-sm'
-                  : 'bg-zinc-900/50 border-zinc-800/80'
+                  : 'bg-zinc-900/55 border-zinc-800/80'
               }`}
             >
               <div className="flex items-center gap-3">
@@ -1206,7 +1250,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
                   className={`w-7 h-7 rounded-lg font-mono text-xs flex items-center justify-center font-bold ${
                     idx === 0
                       ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                      : 'bg-zinc-800 text-zinc-300'
+                      : 'bg-zinc-800 text-zinc-200'
                   }`}
                 >
                   {idx + 1}
@@ -1214,7 +1258,7 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
                 <div>
                   <h4 className="font-semibold text-zinc-100 text-sm">{p.nickname}</h4>
                   {p.streak > 1 && (
-                    <span className="text-[11px] text-amber-400 flex items-center gap-1 font-mono">
+                    <span className="text-xs text-amber-300 flex items-center gap-1 font-mono">
                       <Flame size={12} weight="fill" />
                       <span>{p.streak} seguidas</span>
                     </span>
@@ -1226,22 +1270,27 @@ export const TelaoView: React.FC<TelaoViewProps> = ({
                 <span className="text-lg font-bold text-zinc-100 font-mono tabular-nums">
                   {p.score}
                 </span>
-                <span className="text-[10px] text-zinc-500 block font-mono">pts</span>
+                <span className="text-xs text-zinc-300 block font-mono">pts</span>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Action Button */}
-        <div className="text-center pt-2">
-          <button
-            onClick={handleNextStep}
-            className="px-6 py-3 rounded-2xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs sm:text-sm shadow-sm transition-all flex items-center gap-2 mx-auto active:scale-[0.98]"
-          >
-            <span>{isLastQuestion ? 'Exibir Pódio Final' : 'Próxima Questão'}</span>
-            <ArrowRight size={15} weight="bold" />
-          </button>
+        {/* Botão inferior fixo para avançar */}
+        <div className="fixed bottom-0 inset-x-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/80 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="max-w-xl mx-auto">
+            <button
+              type="button"
+              onClick={handleNextStep}
+              className="w-full min-h-[52px] py-3.5 px-6 rounded-2xl bg-amber-400 hover:bg-amber-300 text-zinc-950 font-display font-extrabold text-base shadow-md transition-all flex items-center justify-center gap-2 active:scale-[0.99]"
+            >
+              <span>{isLastQuestion ? 'Exibir Pódio Final' : 'Próxima Questão'}</span>
+              <ArrowRight size={18} weight="bold" />
+            </button>
+          </div>
         </div>
+
+        {renderModals()}
       </div>
     );
   }

@@ -40,6 +40,10 @@ export const Podium: React.FC<PodiumProps> = ({
   useEffect(() => {
     soundEffects.playFanfare();
 
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     const duration = 2.8 * 1000;
     const end = Date.now() + duration;
 
@@ -99,19 +103,23 @@ export const Podium: React.FC<PodiumProps> = ({
       {/* Title with Celebration Illustration */}
       <div className="text-center space-y-1.5">
         <PodiumCelebrationIllustration className="w-28 h-24 mx-auto" />
-        <span className="text-xs font-mono text-amber-400 uppercase tracking-widest block font-semibold">
-          Pódio Final da Turma
+        <span className="text-xs text-amber-300 font-medium block">
+          Pódio final da turma
         </span>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-zinc-100 font-display">{quizTitle}</h2>
-        <div className="flex items-center justify-center gap-3 text-xs text-zinc-400 font-mono">
-          <span>{totalQuestions} questões</span>
+        <div className="flex items-center justify-center gap-2.5 text-xs text-zinc-300">
+          <span>
+            <strong className="font-mono text-zinc-100 tabular-nums">{totalQuestions}</strong> questões
+          </span>
           <span>·</span>
-          <span>{players.length} participantes</span>
+          <span>
+            <strong className="font-mono text-zinc-100 tabular-nums">{players.length}</strong> participantes
+          </span>
           {report && (
             <>
               <span>·</span>
               <span className="text-emerald-400 font-semibold">
-                {report.averageAccuracy}% acerto geral
+                <strong className="font-mono tabular-nums">{report.averageAccuracy}%</strong> acerto geral
               </span>
             </>
           )}

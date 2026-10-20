@@ -54,6 +54,43 @@ export function shuffleItems<T>(items: T[]): T[] {
 }
 
 /**
+ * Removes answer keys and explanations from questions before storing them in the
+ * public `/sessions/{sessionId}` document so students cannot inspect solutions via DevTools.
+ */
+export function sanitizeQuestionsForPublicSession(questions: Question[]): Question[] {
+  return questions.map((q) => {
+    const sanitized: Question = {
+      id: q.id,
+      type: q.type,
+      question: q.question,
+      timeLimit: q.timeLimit,
+      points: q.points,
+    };
+
+    if (q.options) sanitized.options = [...q.options];
+    if (q.mediaUrl) sanitized.mediaUrl = q.mediaUrl;
+    if (q.mediaType) sanitized.mediaType = q.mediaType;
+    if (q.placeholder) sanitized.placeholder = q.placeholder;
+
+    if (q.type === 'ordering' && q.itemsOrder) {
+      // Store pre-shuffled items so the public array order does not leak the solution
+      sanitized.itemsOrder = shuffleItems(q.itemsOrder);
+    }
+
+    if (q.type === 'matching' && q.pairs) {
+      sanitized.matchingOptions = shuffleItems(q.pairs.map((p) => p.right));
+      sanitized.pairs = q.pairs.map((p) => ({
+        id: p.id,
+        left: p.left,
+        right: '',
+      }));
+    }
+
+    return sanitized;
+  });
+}
+
+/**
  * Validates student answer correctness according to the question format
  */
 export function checkAnswerCorrectness(question: Question, answer: any): boolean {

@@ -8,7 +8,7 @@ import {
   where,
   orderBy,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, auth, resolveCurrentUid } from '../lib/firebase';
 import { QuizReport } from '../types/quiz';
 
 const LOCAL_STORAGE_REPORTS_KEY = 'valendo_local_reports';
@@ -36,7 +36,7 @@ export async function saveQuizReport(
   const reportId =
     'rep_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
   const now = new Date().toISOString();
-  const currentUid = auth.currentUser?.uid || reportData.teacherId || 'guest';
+  const currentUid = auth.currentUser?.uid || reportData.teacherId || resolveCurrentUid();
 
   const fullReport: QuizReport = {
     ...reportData,

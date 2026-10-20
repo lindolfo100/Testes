@@ -1,14 +1,62 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { getFirestore } from 'firebase/firestore';
+import defaultFirebaseConfig from '../../firebase-applet-config.json';
+
+const env = (import.meta as any).env || {};
+
+const firebaseConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY || defaultFirebaseConfig.apiKey,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || defaultFirebaseConfig.authDomain,
+  projectId: env.VITE_FIREBASE_PROJECT_ID || defaultFirebaseConfig.projectId,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || defaultFirebaseConfig.storageBucket,
+  messagingSenderId:
+    env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultFirebaseConfig.messagingSenderId,
+  appId: env.VITE_FIREBASE_APP_ID || defaultFirebaseConfig.appId,
+  firestoreDatabaseId:
+    env.VITE_FIREBASE_DATABASE_ID || defaultFirebaseConfig.firestoreDatabaseId,
+};
 
 const app = initializeApp(firebaseConfig);
 
-// CRITICAL: The app will break without specifying firestoreDatabaseId
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// CRITICAL: Specify firestoreDatabaseId when configured
+export const db = firebaseConfig.firestoreDatabaseId
+  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+  : getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+const DEVICE_UID_KEY = 'valendo_device_uid';
+
+/**
+ * Generates or retrieves a persistent, cryptographically random per-device UID (`dev_<24hex>`)
+ * used as a fallback identity when the user is not signed in with Google and Firebase Anonymous Auth
+ * is not enabled in the Firebase Console.
+ */
+export function getOrCreateDeviceUid(): string {
+  try {
+    const existing = localStorage.getItem(DEVICE_UID_KEY);
+    if (existing && /^dev_[a-f0-9]{24}$/.test(existing)) {
+      return existing;
+    }
+    const bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    const generated = `dev_${hex}`;
+    localStorage.setItem(DEVICE_UID_KEY, generated);
+    return generated;
+  } catch {
+    return 'dev_000000000000000000000000';
+  }
+}
+
+/**
+ * Returns the active Firebase Auth UID (Google or Anonymous) if available,
+ * or falls back to the unique per-device UID.
+ */
+export function resolveCurrentUid(): string {
+  return auth.currentUser?.uid || getOrCreateDeviceUid();
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -61,16 +109,3 @@ export function handleFirestoreError(
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-// Test connection on boot
-export async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase configuration notice: client offline or waiting for active session.');
-    }
-  }
-}
-
-testConnection();

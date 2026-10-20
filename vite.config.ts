@@ -45,9 +45,10 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          cleanupOutdatedCaches: true,
         },
         devOptions: {
-          enabled: true,
+          enabled: process.env.NODE_ENV === 'development',
           type: 'module',
         },
       }),
@@ -71,9 +72,6 @@ export default defineConfig(() => {
           manualChunks(id) {
             if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
               return 'vendor-firebase';
-            }
-            if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
-              return 'vendor-charts';
             }
             if (id.includes('node_modules/@phosphor-icons')) {
               return 'vendor-icons';

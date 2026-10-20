@@ -7,6 +7,8 @@ import {
   updateDoc,
   deleteDoc,
   writeBatch,
+  increment,
+  Timestamp,
   limit,
   query,
   where,
@@ -14,9 +16,10 @@ import {
   orderBy,
   Unsubscribe,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, auth } from '../lib/firebase';
-import { Quiz, Session, Player, Answer, SessionStatus } from '../types/quiz';
+import { db, handleFirestoreError, OperationType, resolveCurrentUid } from '../lib/firebase';
+import { Quiz, Question, Session, Player, Answer } from '../types/quiz';
 import { SAMPLE_QUIZZES } from '../data/sampleQuizzes';
+import { sanitizeQuestionsForPublicSession } from '../lib/quizHelpers';
 
 // Generate 6-digit PIN
 export function generateRoomPin(): string {
@@ -61,7 +64,7 @@ export async function createQuiz(quiz: Omit<Quiz, 'id' | 'createdAt' | 'updatedA
   const quizId = 'quiz_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
   const now = new Date().toISOString();
   const path = `quizzes/${quizId}`;
-  const resolvedOwnerId = auth.currentUser?.uid || quiz.ownerId || 'guest';
+  const resolvedOwnerId = quiz.ownerId && quiz.ownerId !== 'guest' ? quiz.ownerId : resolveCurrentUid();
 
   const payload: Quiz = {
     ...quiz,
@@ -84,7 +87,7 @@ export async function updateQuiz(quizId: string, updates: Partial<Quiz>): Promis
   try {
     const docRef = doc(db, 'quizzes', quizId);
     const snap = await getDoc(docRef);
-    const currentUid = auth.currentUser?.uid || updates.ownerId || 'guest';
+    const currentUid = updates.ownerId && updates.ownerId !== 'guest' ? updates.ownerId : resolveCurrentUid();
 
     // If the quiz does not exist in Firestore, or if it is a system template, create as new personal quiz
     if (!snap.exists() || snap.data()?.ownerId === 'system') {
@@ -127,11 +130,25 @@ export async function deleteQuiz(quizId: string): Promise<void> {
 // SESSION OPERATIONS
 export async function createLiveSession(quiz: Quiz, hostId: string, hostName: string): Promise<Session> {
   const sessionId = 'ses_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-  const pin = generateRoomPin();
+  let pin = generateRoomPin();
+  // Avoid PIN collision with any currently active session
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const existing = await findSessionByPin(pin);
+      if (!existing || existing.status === 'finished') break;
+      pin = generateRoomPin();
+    } catch {
+      break;
+    }
+  }
   const now = new Date().toISOString();
+  const expiresAtMs = Date.now() + 24 * 60 * 60 * 1000;
+  const expiresAtIso = new Date(expiresAtMs).toISOString();
+  const expiresAtTimestamp = Timestamp.fromMillis(expiresAtMs);
   const path = `sessions/${sessionId}`;
 
   const firstQuestionTime = quiz.questions[0]?.timeLimit || 20;
+  const sanitizedQuestions = sanitizeQuestionsForPublicSession(quiz.questions);
 
   const sessionData: Session = {
     id: sessionId,
@@ -140,21 +157,46 @@ export async function createLiveSession(quiz: Quiz, hostId: string, hostName: st
     hostName: hostName || 'Professor(a)',
     quizId: quiz.id,
     quizTitle: quiz.title,
-    questions: quiz.questions,
+    questions: sanitizedQuestions,
     status: 'lobby',
     currentQuestionIndex: 0,
     totalQuestions: quiz.questions.length,
     isAcceptingAnswers: false,
     timeLimitSeconds: firstQuestionTime,
+    revealedQuestion: null,
     createdAt: now,
+    expiresAt: expiresAtIso,
+    expiresAtTimestamp,
   };
 
   try {
-    await setDoc(doc(db, 'sessions', sessionId), sessionData);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'sessions', sessionId), sessionData);
+    // Store full unredacted questions in private host-only subcollection
+    batch.set(doc(db, 'sessions', sessionId, 'private', 'config'), {
+      hostId,
+      questions: quiz.questions,
+      createdAt: now,
+      expiresAt: expiresAtIso,
+      expiresAtTimestamp,
+    });
+    await batch.commit();
     return sessionData;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
+}
+
+export async function getSessionPrivateQuestions(sessionId: string): Promise<Question[] | null> {
+  try {
+    const snap = await getDoc(doc(db, 'sessions', sessionId, 'private', 'config'));
+    if (snap.exists() && Array.isArray(snap.data()?.questions)) {
+      return snap.data().questions as Question[];
+    }
+  } catch (error) {
+    console.warn('Could not fetch private session questions:', error);
+  }
+  return null;
 }
 
 export async function findSessionByPin(pin: string): Promise<Session | null> {
@@ -219,6 +261,7 @@ export async function joinSessionAsPlayer(
   const playerData: Player = {
     id: playerId,
     sessionId,
+    uid: resolveCurrentUid(),
     nickname: nickname.trim().substring(0, 40),
     score: 0,
     streak: 0,
@@ -273,42 +316,68 @@ export function subscribeToPlayers(
 // ANSWER OPERATIONS
 export async function submitAnswer(
   sessionId: string,
-  answer: Omit<Answer, 'id' | 'submittedAt'>,
-  currentScore: number,
-  currentStreak: number
-): Promise<{ score: number; streak: number }> {
+  answer: Pick<Answer, 'sessionId' | 'questionIndex' | 'playerId' | 'playerNickname' | 'answer' | 'timeSpentMs'>
+): Promise<void> {
   // Deterministic ID prevents duplicate submissions for the same question by the same player
   const answerId = `ans_${answer.playerId}_q_${answer.questionIndex}`;
   const now = new Date().toISOString();
 
+  // Student submits ungraded answer; the host (TelaoView) evaluates correctness and awards points
   const answerPayload: Answer = {
     ...answer,
     id: answerId,
+    isCorrect: false,
+    pointsAwarded: 0,
+    gradedByHost: false,
     submittedAt: now,
   };
 
-  const newStreak = answer.isCorrect ? currentStreak + 1 : 0;
-  const newScore = currentScore + (answer.isCorrect ? answer.pointsAwarded : 0);
+  const answerRef = doc(db, 'sessions', sessionId, 'answers', answerId);
 
   try {
-    const answerRef = doc(db, 'sessions', sessionId, 'answers', answerId);
-    const playerRef = doc(db, 'sessions', sessionId, 'players', answer.playerId);
-
-    // Single atomic network roundtrip (0 extra reads, 66% lower latency on mobile 3G/4G)
-    // Firestore rules enforce allow create: if true; allow update: if false on /answers/{answerId}
-    const batch = writeBatch(db);
-    batch.set(answerRef, answerPayload);
-    batch.update(playerRef, {
-      score: newScore,
-      streak: newStreak,
-    });
-    await batch.commit();
-
-    return { score: newScore, streak: newStreak };
-  } catch {
-    // If answer doc already exists (duplicate submission), return existing score/streak gracefully
-    return { score: currentScore, streak: currentStreak };
+    await setDoc(answerRef, answerPayload);
+  } catch (err) {
+    // Only treat as graceful duplicate if the answer document actually exists in Firestore
+    try {
+      const existingSnap = await getDoc(answerRef);
+      if (existingSnap.exists()) {
+        return;
+      }
+    } catch {
+      // Ignore secondary read failure and rethrow original submission error
+    }
+    throw err;
   }
+}
+
+/**
+ * Executed by the session host (TelaoView) using the private answer key and host clock
+ * to grade a submitted answer and atomically update the player's official score and streak.
+ */
+export async function gradeAnswerAsHost(
+  sessionId: string,
+  answerId: string,
+  playerId: string,
+  isCorrect: boolean,
+  pointsAwarded: number,
+  timeSpentMs: number
+): Promise<void> {
+  const answerRef = doc(db, 'sessions', sessionId, 'answers', answerId);
+  const playerRef = doc(db, 'sessions', sessionId, 'players', playerId);
+
+  const batch = writeBatch(db);
+  batch.update(answerRef, {
+    isCorrect,
+    pointsAwarded,
+    timeSpentMs,
+    gradedByHost: true,
+  });
+  batch.update(playerRef, {
+    score: increment(isCorrect ? pointsAwarded : 0),
+    streak: isCorrect ? increment(1) : 0,
+    lastAnswerId: answerId,
+  });
+  await batch.commit();
 }
 
 export function subscribeToAnswers(
@@ -343,42 +412,61 @@ export function subscribeToAnswers(
  * Resets a live session (clears previous answers and resets connected players' scores to 0)
  * so the teacher can restart the quiz from the beginning or return to the lobby without
  * requiring students to scan the QR code or type the PIN again.
+ * Chunks write operations into batches of <= 450 to respect Firestore's 500-op limit.
  */
 export async function restartLiveSession(
   sessionId: string,
   startImmediately = false,
   firstQuestionTimeLimit = 20
 ): Promise<void> {
+  const MAX_BATCH_OPS = 450;
+
   try {
     const [answersSnap, playersSnap] = await Promise.all([
       getDocs(collection(db, 'sessions', sessionId, 'answers')),
       getDocs(collection(db, 'sessions', sessionId, 'players')),
     ]);
 
-    const batch = writeBatch(db);
+    let currentBatch = writeBatch(db);
+    let opCount = 0;
 
-    answersSnap.forEach((ansDoc) => {
-      batch.delete(ansDoc.ref);
-    });
+    const flushBatchIfNeeded = async () => {
+      if (opCount >= MAX_BATCH_OPS) {
+        await currentBatch.commit();
+        currentBatch = writeBatch(db);
+        opCount = 0;
+      }
+    };
 
-    playersSnap.forEach((playerDoc) => {
-      batch.update(playerDoc.ref, {
+    for (const ansDoc of answersSnap.docs) {
+      await flushBatchIfNeeded();
+      currentBatch.delete(ansDoc.ref);
+      opCount++;
+    }
+
+    for (const playerDoc of playersSnap.docs) {
+      await flushBatchIfNeeded();
+      currentBatch.update(playerDoc.ref, {
         score: 0,
         streak: 0,
       });
-    });
+      opCount++;
+    }
+
+    await flushBatchIfNeeded();
 
     const sessionRef = doc(db, 'sessions', sessionId);
-    batch.update(sessionRef, {
+    currentBatch.update(sessionRef, {
       status: startImmediately ? 'question' : 'lobby',
       currentQuestionIndex: 0,
       isAcceptingAnswers: Boolean(startImmediately),
       timeLimitSeconds: firstQuestionTimeLimit,
       questionStartedAt: Date.now(),
+      revealedQuestion: null,
       rankingSnapshot: [],
     });
 
-    await batch.commit();
+    await currentBatch.commit();
   } catch (error) {
     console.warn('Fallback session restart:', error);
     await updateSessionState(sessionId, {
@@ -387,6 +475,7 @@ export async function restartLiveSession(
       isAcceptingAnswers: Boolean(startImmediately),
       timeLimitSeconds: firstQuestionTimeLimit,
       questionStartedAt: Date.now(),
+      revealedQuestion: null,
       rankingSnapshot: [],
     });
   }
@@ -405,4 +494,3 @@ export async function closeLiveSession(sessionId: string): Promise<void> {
     console.warn('Could not close session:', error);
   }
 }
-

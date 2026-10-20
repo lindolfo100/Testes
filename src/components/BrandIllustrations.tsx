@@ -200,7 +200,7 @@ export const WaitingRoomIllustration: React.FC<{ className?: string }> = ({
     <circle cx="112" cy="66" r="26" fill="#FBBF24" fillOpacity="0.12" />
 
     {/* Floating Game Shapes */}
-    <g className="animate-float-slow">
+    <g>
       <rect
         x="30"
         y="36"
@@ -285,7 +285,7 @@ export const EmptyQuizzesIllustration: React.FC<{ className?: string }> = ({
     <rect x="68" y="72" width="22" height="6" rx="3" fill="#FB7185" fillOpacity="0.85" />
 
     {/* Floating Plus / Spark Badge */}
-    <g className="animate-float-slow">
+    <g>
       <circle cx="112" cy="78" r="16" fill="#FBBF24" />
       <path
         d="M112 71V85M105 78H119"
@@ -351,7 +351,7 @@ export const AnswerSentIllustration: React.FC<{ className?: string }> = ({
     <circle cx="60" cy="60" r="46" fill="#34D399" fillOpacity="0.12" />
     <circle cx="40" cy="78" r="22" fill="#38BDF8" fillOpacity="0.12" />
 
-    <g className="animate-float-slow">
+    <g>
       {/* Glowing Sent Card */}
       <rect
         x="34"
@@ -399,7 +399,7 @@ export const CorrectAnswerIllustration: React.FC<{ className?: string }> = ({
     <circle cx="60" cy="60" r="46" fill="#10B981" fillOpacity="0.16" />
     <circle cx="60" cy="60" r="32" fill="#10B981" fillOpacity="0.24" />
 
-    <g className="animate-float-slow">
+    <g>
       {/* Emerald Victory Shield/Circle */}
       <circle cx="60" cy="58" r="26" fill="#10B981" />
       <path
@@ -443,7 +443,7 @@ export const KeepGoingIllustration: React.FC<{ className?: string }> = ({
     <circle cx="60" cy="60" r="46" fill="#FB7185" fillOpacity="0.14" />
     <circle cx="76" cy="48" r="26" fill="#FBBF24" fillOpacity="0.12" />
 
-    <g className="animate-float-slow">
+    <g>
       {/* Target / Learning Bulb Badge */}
       <rect
         x="34"
@@ -485,7 +485,7 @@ export const TimeUpIllustration: React.FC<{ className?: string }> = ({
   <svg viewBox="0 0 120 120" fill="none" className={className}>
     <circle cx="60" cy="62" r="44" fill="#FBBF24" fillOpacity="0.12" />
 
-    <g className="animate-float-slow">
+    <g>
       {/* Top stopwatch button */}
       <rect x="52" y="18" width="16" height="6" rx="3" fill="#FBBF24" />
       <path d="M60 24V30" stroke="#FBBF24" strokeWidth="4" strokeLinecap="round" />
@@ -526,7 +526,7 @@ export const OpinionRegisteredIllustration: React.FC<{ className?: string }> = (
   <svg viewBox="0 0 120 120" fill="none" className={className}>
     <circle cx="60" cy="60" r="46" fill="#38BDF8" fillOpacity="0.14" />
 
-    <g className="animate-float-slow">
+    <g>
       {/* Back speech bubble */}
       <rect
         x="48"
@@ -570,7 +570,7 @@ export const LeaderboardBadgeIllustration: React.FC<{ className?: string }> = ({
     <rect x="74" y="70" width="22" height="22" rx="5" fill="#FB7185" />
 
     {/* Floating Crown above 1st place */}
-    <g className="animate-float-slow">
+    <g>
       <path
         d="M48 38L52 26L60 33L68 26L72 38H48Z"
         fill="#FBBF24"
@@ -625,7 +625,7 @@ export const AiStudioIllustration: React.FC<{ className?: string }> = ({
     />
 
     {/* Generated Interactive Quiz Cards */}
-    <g className="animate-float-slow">
+    <g>
       <rect
         x="92"
         y="24"
@@ -656,7 +656,7 @@ export const PodiumCelebrationIllustration: React.FC<{ className?: string }> = (
     <circle cx="44" cy="68" r="24" fill="#38BDF8" fillOpacity="0.12" />
     <circle cx="116" cy="68" r="24" fill="#FB7185" fillOpacity="0.12" />
 
-    <g className="animate-float-slow">
+    <g>
       {/* Golden Trophy Cup */}
       <path
         d="M58 28H102V50C102 62.15 92.15 72 80 72C67.85 72 58 62.15 58 50V28Z"

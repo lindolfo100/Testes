@@ -1,13 +1,7 @@
 import React, { useMemo } from 'react';
 import { Answer, Question } from '../types/quiz';
 import { QUESTION_TYPES_META } from '../lib/quizHelpers';
-import {
-  Lightning,
-  ClockCountdown,
-  CheckCircle,
-  Users,
-  ChartBar,
-} from '@phosphor-icons/react';
+import { Lightning } from '@phosphor-icons/react';
 
 interface DataCloudProps {
   question: Question;
@@ -22,12 +16,10 @@ export const DataCloud: React.FC<DataCloudProps> = ({ question, answers, totalPl
     const totalAnswers = answers.length;
     const correctAnswers = answers.filter((a) => a.isCorrect).length;
     const accuracyPct = totalAnswers > 0 ? Math.round((correctAnswers / totalAnswers) * 100) : 0;
-    const participationPct =
-      totalPlayers > 0 ? Math.min(100, Math.round((totalAnswers / totalPlayers) * 100)) : 0;
 
     const times = answers.map((a) => a.timeSpentMs).filter((t) => t > 0);
     const avgTimeMs = times.length > 0 ? times.reduce((acc, cur) => acc + cur, 0) / times.length : 0;
-    const avgTimeSec = (avgTimeMs / 1000).toFixed(1);
+    const avgTimeSec = (avgTimeMs / 1000).toFixed(1).replace('.', ',');
 
     const eligibleForFastest = isOpinion ? answers : answers.filter((a) => a.isCorrect);
     const fastestAnswer = eligibleForFastest.reduce<Answer | null>((min, cur) => {
@@ -39,88 +31,64 @@ export const DataCloud: React.FC<DataCloudProps> = ({ question, answers, totalPl
       totalAnswers,
       correctAnswers,
       accuracyPct,
-      participationPct,
       avgTimeSec,
       fastestAnswer,
     };
-  }, [answers, question, totalPlayers, isOpinion]);
+  }, [answers, question, isOpinion]);
 
   return (
     <div className="w-full max-w-4xl mx-auto">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800/80">
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 font-mono uppercase tracking-wider mb-1">
-            <Users size={14} weight="regular" />
-            <span>Participação</span>
-          </div>
-          <div className="text-lg font-bold text-zinc-100 font-mono tabular-nums">
+      <div className="py-3 px-4 rounded-2xl bg-zinc-900/50 border border-zinc-800/80 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-xs sm:text-sm text-zinc-300 text-center">
+        <span>
+          <strong className="font-mono text-zinc-100 tabular-nums">
             {analytics.totalAnswers}/{totalPlayers}
-          </div>
-          <span className="text-[11px] text-zinc-500 font-mono">
-            {analytics.participationPct}% da turma
+          </strong>{' '}
+          responderam
+        </span>
+
+        <span className="text-zinc-600" aria-hidden="true">
+          ·
+        </span>
+
+        {isOpinion ? (
+          <span>Sondagem livre</span>
+        ) : (
+          <span>
+            <strong className="font-mono text-emerald-400 tabular-nums">
+              {analytics.accuracyPct}%
+            </strong>{' '}
+            acertos
           </span>
-        </div>
+        )}
 
-        <div className="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800/80">
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 font-mono uppercase tracking-wider mb-1">
-            {isOpinion ? (
-              <>
-                <ChartBar size={14} weight="regular" />
-                <span>Modalidade</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle size={14} weight="regular" />
-                <span>Taxa de Acerto</span>
-              </>
-            )}
-          </div>
-          {isOpinion ? (
-            <>
-              <div className="text-sm font-bold text-zinc-100 pt-0.5">Opinião Livre</div>
-              <span className="text-[11px] text-zinc-400 font-mono">Sem gabarito fixo</span>
-            </>
-          ) : (
-            <>
-              <div className="text-lg font-bold text-zinc-100 font-mono tabular-nums">
-                {analytics.accuracyPct}%
-              </div>
-              <span className="text-[11px] text-emerald-400 font-mono">
-                {analytics.correctAnswers} {analytics.correctAnswers === 1 ? 'acerto' : 'acertos'}
-              </span>
-            </>
-          )}
-        </div>
+        <span className="text-zinc-600" aria-hidden="true">
+          ·
+        </span>
 
-        <div className="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800/80">
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 font-mono uppercase tracking-wider mb-1">
-            <ClockCountdown size={14} weight="regular" />
-            <span>Tempo Médio</span>
-          </div>
-          <div className="text-lg font-bold text-zinc-100 font-mono tabular-nums">
+        <span>
+          <strong className="font-mono text-zinc-100 tabular-nums">
             {analytics.avgTimeSec}s
-          </div>
-          <span className="text-[11px] text-zinc-500 font-mono">por envio</span>
-        </div>
+          </strong>{' '}
+          em média
+        </span>
 
-        <div className="p-3.5 rounded-2xl bg-zinc-900/50 border border-zinc-800/80">
-          <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 font-mono uppercase tracking-wider mb-1">
-            <Lightning size={14} weight="fill" className="text-amber-400" />
-            <span>Mais Rápido</span>
-          </div>
-          <div
-            className="text-sm font-bold text-zinc-100 truncate"
-            title={analytics.fastestAnswer?.playerNickname || '-'}
-          >
-            {analytics.fastestAnswer?.playerNickname || '—'}
-          </div>
-          <span className="text-[11px] text-zinc-500 font-mono tabular-nums">
-            {analytics.fastestAnswer
-              ? `${((analytics.fastestAnswer.timeSpentMs || 0) / 1000).toFixed(2)}s`
-              : 'Sem registro'}
-          </span>
-        </div>
+        {analytics.fastestAnswer && (
+          <>
+            <span className="text-zinc-600" aria-hidden="true">
+              ·
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Lightning size={14} weight="fill" className="text-amber-400 shrink-0" />
+              <span>Mais rápido:</span>
+              <strong className="text-zinc-100">{analytics.fastestAnswer.playerNickname}</strong>
+              <span className="font-mono text-zinc-300 tabular-nums">
+                ({((analytics.fastestAnswer.timeSpentMs || 0) / 1000).toFixed(1).replace('.', ',')}s)
+              </span>
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
 };
+

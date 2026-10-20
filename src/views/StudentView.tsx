@@ -47,16 +47,20 @@ import {
   Check,
 } from '@phosphor-icons/react';
 
+import { StudentHeaderHud } from '../components/Navbar';
+
 interface StudentViewProps {
   initialPin?: string | null;
   quizzes: Quiz[];
   onBackToDashboard: () => void;
+  onHudChange?: (hud: StudentHeaderHud | null) => void;
 }
 
 export const StudentView: React.FC<StudentViewProps> = ({
   initialPin,
   quizzes,
   onBackToDashboard,
+  onHudChange,
 }) => {
   const [pin, setPin] = useState(initialPin || '');
   const [nickname, setNickname] = useState(
@@ -73,8 +77,11 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [fetchedQuiz, setFetchedQuiz] = useState<Quiz | null>(null);
   const [player, setPlayer] = useState<Player | null>(null);
   const [hasAnsweredCurrentQ, setHasAnsweredCurrentQ] = useState(false);
+  const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<any>(null);
   const [timeLeft, setTimeLeft] = useState<number>(20);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const lastPlayedResultQRef = useRef<number | null>(null);
 
   // State for interactive formats:
@@ -153,6 +160,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
           localStorage.removeItem(STORAGE_KEYS.PLAYER_ANSWERED_KEY);
           localStorage.removeItem(STORAGE_KEYS.PLAYER_SELECTED_ANSWER);
           setHasAnsweredCurrentQ(false);
+          setIsSubmittingAnswer(false);
+          setSubmitError(null);
           setSelectedAnswer(null);
           lastPlayedResultQRef.current = null;
           setPlayer((prev) => (prev ? { ...prev, score: 0, streak: 0 } : prev));
@@ -181,6 +190,27 @@ export const StudentView: React.FC<StudentViewProps> = ({
     : currentQuiz?.questions || [];
   const questionIndex = activeSession?.currentQuestionIndex ?? 0;
   const currentQuestion = sessionQuestions[questionIndex];
+  const revealedQuestion =
+    activeSession?.revealedQuestion && activeSession.revealedQuestion.id === currentQuestion?.id
+      ? activeSession.revealedQuestion
+      : currentQuestion;
+
+  // Sync authoritative host-computed score & streak from rankingSnapshot when available
+  useEffect(() => {
+    if (!player?.id || !activeSession?.rankingSnapshot?.length) return;
+    const entry = activeSession.rankingSnapshot.find((p) => p.id === player.id);
+    if (entry) {
+      setPlayer((prev) =>
+        prev
+          ? {
+              ...prev,
+              score: entry.score,
+              streak: typeof entry.streak === 'number' ? entry.streak : prev.streak,
+            }
+          : prev
+      );
+    }
+  }, [activeSession?.rankingSnapshot, player?.id]);
 
   // Reset or restore interactive inputs when moving to a new question (or restarted round)
   useEffect(() => {
@@ -192,6 +222,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
     if (savedKey === currentKey && savedAnsRaw) {
       setHasAnsweredCurrentQ(true);
+      setIsSubmittingAnswer(false);
+      setSubmitError(null);
       try {
         setSelectedAnswer(JSON.parse(savedAnsRaw));
       } catch {
@@ -199,6 +231,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
       }
     } else {
       setHasAnsweredCurrentQ(false);
+      setIsSubmittingAnswer(false);
+      setSubmitError(null);
       setSelectedAnswer(null);
     }
 
@@ -208,7 +242,11 @@ export const StudentView: React.FC<StudentViewProps> = ({
     setWordCloudInput('');
 
     if (currentQuestion?.type === 'matching' && currentQuestion.pairs) {
-      setShuffledRightOptions(shuffleItems(currentQuestion.pairs.map((p) => p.right)));
+      const rightOptions =
+        currentQuestion.matchingOptions && currentQuestion.matchingOptions.length > 0
+          ? currentQuestion.matchingOptions
+          : shuffleItems(currentQuestion.pairs.map((p) => p.right));
+      setShuffledRightOptions(rightOptions);
       setActivePairLeft(currentQuestion.pairs[0]?.id || null);
     } else {
       setActivePairLeft(null);
@@ -247,22 +285,51 @@ export const StudentView: React.FC<StudentViewProps> = ({
     currentQuestion?.timeLimit,
   ]);
 
+  // Sync student HUD (name, remaining time, points) to top contextual Navbar
+  useEffect(() => {
+    if (!onHudChange) return;
+    if (activeSession && player) {
+      onHudChange({
+        nickname: player.nickname,
+        score: player.score,
+        timeLeft,
+        showTimer: activeSession.status === 'question' && activeSession.isAcceptingAnswers,
+      });
+    } else {
+      onHudChange(null);
+    }
+  }, [
+    onHudChange,
+    activeSession?.id,
+    activeSession?.status,
+    activeSession?.isAcceptingAnswers,
+    player?.nickname,
+    player?.score,
+    timeLeft,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      onHudChange?.(null);
+    };
+  }, [onHudChange]);
+
   // Play sound feedback on student phone when result is revealed
   useEffect(() => {
-    if (activeSession?.status === 'result' && currentQuestion) {
+    if (activeSession?.status === 'result' && revealedQuestion) {
       if (lastPlayedResultQRef.current === questionIndex) return;
       lastPlayedResultQRef.current = questionIndex;
 
-      const meta = QUESTION_TYPES_META[currentQuestion.type];
+      const meta = QUESTION_TYPES_META[revealedQuestion.type];
       if (selectedAnswer !== null && selectedAnswer !== undefined) {
-        if (meta?.isOpinion || checkAnswerCorrectness(currentQuestion, selectedAnswer)) {
+        if (meta?.isOpinion || checkAnswerCorrectness(revealedQuestion, selectedAnswer)) {
           soundEffects.playCorrect();
         } else {
           soundEffects.playIncorrect();
         }
       }
     }
-  }, [activeSession?.status, currentQuestion, questionIndex, selectedAnswer]);
+  }, [activeSession?.status, revealedQuestion, questionIndex, selectedAnswer]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -325,58 +392,42 @@ export const StudentView: React.FC<StudentViewProps> = ({
     }
   };
 
-  const handleSubmitAnswer = async (answerValue: any) => {
-    if (!activeSession || !player || !currentQuestion || hasAnsweredCurrentQ) return;
+  const handleSubmitAnswer = async (answerValue: any, isRetry = false) => {
+    if (!activeSession || !player || !currentQuestion) return;
+    if (hasAnsweredCurrentQ && !isRetry) return;
     if (!activeSession.isAcceptingAnswers) return;
 
     setSelectedAnswer(answerValue);
     setHasAnsweredCurrentQ(true);
-    const roundStamp = activeSession.questionStartedAt || 0;
-    localStorage.setItem(
-      STORAGE_KEYS.PLAYER_ANSWERED_KEY,
-      `${activeSession.id}_${questionIndex}_${roundStamp}`
-    );
-    localStorage.setItem(STORAGE_KEYS.PLAYER_SELECTED_ANSWER, JSON.stringify(answerValue));
+    setIsSubmittingAnswer(true);
+    setSubmitError(null);
 
-    const isCorrect = checkAnswerCorrectness(currentQuestion, answerValue);
     const startedAt = activeSession.questionStartedAt || Date.now();
     const timeSpentMs = Math.max(500, Date.now() - startedAt);
 
-    const basePoints = currentQuestion.points ?? 1000;
-    const timeLimitMs = (activeSession.timeLimitSeconds || 20) * 1000;
-    const speedRatio = Math.max(0.2, Math.min(1, (timeLimitMs - timeSpentMs) / timeLimitMs));
-    const pointsAwarded = isCorrect && basePoints > 0 ? Math.round(basePoints * (0.6 + 0.4 * speedRatio)) : 0;
-
-    // Optimistic local update so the student phone needs zero live listeners on players collection
-    const optimisticScore = player.score + (isCorrect ? pointsAwarded : 0);
-    const optimisticStreak = isCorrect ? player.streak + 1 : 0;
-    setPlayer((prev) =>
-      prev ? { ...prev, score: optimisticScore, streak: optimisticStreak } : prev
-    );
-
     try {
-      const updatedStats = await submitAnswer(
-        activeSession.id,
-        {
-          sessionId: activeSession.id,
-          questionIndex,
-          playerId: player.id,
-          playerNickname: player.nickname,
-          answer: answerValue,
-          isCorrect,
-          pointsAwarded,
-          timeSpentMs,
-        },
-        player.score,
-        player.streak
+      await submitAnswer(activeSession.id, {
+        sessionId: activeSession.id,
+        questionIndex,
+        playerId: player.id,
+        playerNickname: player.nickname,
+        answer: answerValue,
+        timeSpentMs,
+      });
+
+      const roundStamp = activeSession.questionStartedAt || 0;
+      localStorage.setItem(
+        STORAGE_KEYS.PLAYER_ANSWERED_KEY,
+        `${activeSession.id}_${questionIndex}_${roundStamp}`
       );
-      if (updatedStats) {
-        setPlayer((prev) =>
-          prev ? { ...prev, score: updatedStats.score, streak: updatedStats.streak } : prev
-        );
-      }
+      localStorage.setItem(STORAGE_KEYS.PLAYER_SELECTED_ANSWER, JSON.stringify(answerValue));
     } catch (err) {
       console.error('Failed to submit answer:', err);
+      localStorage.removeItem(STORAGE_KEYS.PLAYER_ANSWERED_KEY);
+      localStorage.removeItem(STORAGE_KEYS.PLAYER_SELECTED_ANSWER);
+      setSubmitError('Não foi possível enviar sua resposta. Verifique sua conexão e tente novamente.');
+    } finally {
+      setIsSubmittingAnswer(false);
     }
   };
 
@@ -392,23 +443,19 @@ export const StudentView: React.FC<StudentViewProps> = ({
   // 1. PIN & NICKNAME LOGIN FORM
   if (!activeSession || !player) {
     return (
-      <div className="max-w-sm sm:max-w-md mx-auto px-4 py-8 sm:py-10 space-y-6">
-        <div className="text-center space-y-2.5">
-          <StepRespondIllustration className="w-24 h-24 mx-auto" />
-          <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-semibold block">
-            Modo Participante
-          </span>
+      <div className="max-w-sm sm:max-w-md mx-auto px-4 py-6 sm:py-10 space-y-5">
+        <div className="text-center space-y-1">
           <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-100 tracking-tight font-display">
             Entrar na Rodada
           </h1>
-          <p className="text-sm text-zinc-300 leading-relaxed">
-            Digite o PIN projetado no telão ou escaneie o QR Code
+          <p className="text-sm text-zinc-300">
+            Informe o PIN projetado no telão e seu nome.
           </p>
         </div>
 
         <form
           onSubmit={handleJoin}
-          className="p-6 sm:p-7 rounded-3xl bg-zinc-900/60 border border-zinc-800/90 space-y-5 shadow-lg shadow-black/20"
+          className="p-5 sm:p-6 rounded-2xl bg-zinc-900/65 border border-zinc-800 space-y-4"
         >
           {errorMsg && (
             <div className="p-3.5 rounded-xl bg-rose-950/45 border border-rose-500/40 text-rose-200 text-sm flex items-center gap-2.5">
@@ -417,23 +464,23 @@ export const StudentView: React.FC<StudentViewProps> = ({
             </div>
           )}
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-mono uppercase tracking-wider text-zinc-300 font-semibold">
-                PIN da Sala
+              <label htmlFor="student-pin-input" className="text-xs font-medium text-zinc-200">
+                PIN da sala
               </label>
               <div className="flex items-center gap-2">
                 {pin.length === 6 && (
-                  <span className="text-xs font-mono text-emerald-400 flex items-center gap-1 font-medium">
+                  <span className="text-xs text-emerald-400 flex items-center gap-1 font-medium">
                     <CheckCircle size={14} weight="fill" />
-                    <span>PIN identificado</span>
+                    <span>PIN pronto</span>
                   </span>
                 )}
                 {pin.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setPin('')}
-                    className="text-xs font-mono text-zinc-400 hover:text-zinc-200 underline underline-offset-2"
+                    className="text-xs text-zinc-300 hover:text-white underline underline-offset-2"
                   >
                     Limpar
                   </button>
@@ -441,6 +488,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
               </div>
             </div>
             <input
+              id="student-pin-input"
               type="text"
               inputMode="numeric"
               maxLength={6}
@@ -448,23 +496,24 @@ export const StudentView: React.FC<StudentViewProps> = ({
               onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
               placeholder="000000"
               autoFocus={pin.length !== 6}
-              className="w-full text-center text-3xl sm:text-4xl font-black font-mono tracking-widest py-3.5 px-4 rounded-2xl bg-zinc-950 border border-zinc-750 text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-400/70 transition-colors tabular-nums"
+              className="w-full text-center text-2xl sm:text-3xl font-extrabold font-mono tracking-widest py-3 px-4 rounded-xl bg-zinc-950 border border-zinc-750 text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-400 transition-colors tabular-nums"
               required
             />
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-mono uppercase tracking-wider text-zinc-300 font-semibold block">
-              Seu Nome ou Apelido
+          <div className="space-y-1.5">
+            <label htmlFor="student-name-input" className="text-xs font-medium text-zinc-200 block">
+              Seu nome ou apelido
             </label>
             <input
+              id="student-name-input"
               type="text"
               maxLength={30}
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
               placeholder="Ex: Beatriz, Lucas"
               autoFocus={pin.length === 6}
-              className="w-full py-3.5 px-4 rounded-2xl bg-zinc-950 border border-zinc-750 text-white text-base font-medium placeholder:text-zinc-500 focus:outline-none focus:border-amber-400/70 transition-colors"
+              className="w-full min-h-[48px] py-3 px-4 rounded-xl bg-zinc-950 border border-zinc-750 text-white text-base font-medium placeholder:text-zinc-400 focus:outline-none focus:border-amber-400 transition-colors"
               required
             />
           </div>
@@ -472,7 +521,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
           <button
             type="submit"
             disabled={isJoining}
-            className="w-full py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-zinc-950 font-display font-extrabold text-base shadow-sm transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+            className="w-full min-h-[52px] py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-zinc-950 font-display font-extrabold text-base shadow-sm transition-all flex items-center justify-center gap-2"
           >
             <span>{isJoining ? 'Conectando...' : 'Participar Agora'}</span>
             <ArrowRight size={18} weight="bold" />
@@ -481,65 +530,97 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
         <div className="text-center">
           <button
+            type="button"
             onClick={onBackToDashboard}
-            className="text-sm text-zinc-400 hover:text-zinc-200 transition-colors inline-flex items-center gap-1.5 py-1"
+            className="min-h-[44px] px-3 text-xs text-zinc-300 hover:text-white transition-colors inline-flex items-center gap-1.5"
           >
-            <ArrowLeft size={15} weight="bold" />
-            <span>Ir para a tela inicial</span>
+            <ArrowLeft size={14} weight="bold" />
+            <span>Voltar ao início</span>
           </button>
         </div>
       </div>
     );
   }
 
+  const renderLeaveConfirmModal = () => {
+    if (!showLeaveConfirm) return null;
+    return (
+      <div
+        onClick={() => setShowLeaveConfirm(false)}
+        className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl text-left"
+        >
+          <h3 className="text-base font-bold text-zinc-100 font-display">
+            Sair desta sala?
+          </h3>
+          <p className="text-xs text-zinc-300 leading-relaxed">
+            Você sairá da rodada atual (PIN {activeSession.pin}) e poderá digitar o PIN de outra sala.
+          </p>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setShowLeaveConfirm(false)}
+              className="min-h-[44px] px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-xs font-semibold transition-colors"
+            >
+              Continuar aqui
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowLeaveConfirm(false);
+                handleLeaveRoom(true);
+              }}
+              className="min-h-[44px] px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-zinc-950 text-xs font-bold transition-colors"
+            >
+              Sim, Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // 2. LOBBY WAITING ROOM
   if (activeSession.status === 'lobby') {
     return (
       <div className="max-w-sm sm:max-w-md mx-auto px-4 py-8 sm:py-10 space-y-5 text-center">
-        <div className="flex items-center justify-between text-xs bg-zinc-900/65 px-4 py-2.5 rounded-2xl border border-zinc-800/90">
-          <span className="font-mono text-zinc-300 font-semibold">
-            Sala <strong className="text-emerald-400">#{activeSession.pin}</strong>
-          </span>
-          <button
-            type="button"
-            onClick={() => handleLeaveRoom(true)}
-            className="text-zinc-300 hover:text-rose-400 font-semibold flex items-center gap-1.5 transition-colors"
-          >
-            <ArrowsLeftRight size={14} weight="bold" />
-            <span>Trocar Sala / Sair</span>
-          </button>
-        </div>
+        <div className="p-6 sm:p-8 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-4">
+          <WaitingRoomIllustration className="w-24 h-24 mx-auto" />
 
-        <div className="p-7 sm:p-8 rounded-3xl bg-zinc-900/60 border border-zinc-800/90 space-y-5 shadow-lg shadow-black/20">
-          <WaitingRoomIllustration className="w-28 h-28 mx-auto" />
-
-          <div className="space-y-1.5">
-            <span className="text-xs uppercase tracking-widest text-emerald-400 font-mono font-semibold inline-flex items-center gap-1.5">
+          <div className="space-y-1">
+            <span className="text-xs text-emerald-400 font-semibold inline-flex items-center gap-1.5">
               <CheckCircle size={15} weight="fill" />
-              <span>Você está na sala!</span>
+              <span>
+                Você está na sala · PIN <strong className="font-mono tabular-nums">{activeSession.pin}</strong>
+              </span>
             </span>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-zinc-100 font-display">
               {player.nickname}
             </h2>
+            <p className="text-sm text-zinc-300 font-medium pt-0.5">
+              {activeSession.quizTitle}
+            </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 text-sm sm:text-base text-zinc-200 font-semibold">
-            {activeSession.quizTitle}
-          </div>
-
-          <div className="flex items-center justify-center gap-2 text-sm text-zinc-300 pt-1">
+          <div className="flex items-center justify-center gap-2 text-sm text-zinc-300 pt-2 border-t border-zinc-800/70">
             <CircleNotch size={16} weight="bold" className="animate-spin text-amber-400 shrink-0" />
             <span>Olhe para o telão — já vai começar!</span>
           </div>
         </div>
 
         <button
-          onClick={() => handleLeaveRoom(true)}
-          className="px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-sm text-zinc-300 hover:text-rose-300 inline-flex items-center gap-2 mx-auto transition-colors font-semibold"
+          type="button"
+          onClick={() => setShowLeaveConfirm(true)}
+          className="min-h-[44px] px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-xs text-zinc-300 hover:text-rose-300 inline-flex items-center gap-2 mx-auto transition-colors font-semibold"
         >
           <SignOut size={16} weight="bold" />
-          <span>Sair ou Entrar em Outro Quiz</span>
+          <span>Sair ou Trocar de Sala</span>
         </button>
+
+        {renderLeaveConfirmModal()}
       </div>
     );
   }
@@ -548,100 +629,150 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const QuestionIcon = questionMeta?.icon;
   const youtubeEmbedUrl = getYouTubeEmbedUrl(currentQuestion?.mediaUrl);
 
+  // Helper to format the student's chosen answer cleanly on the waiting screen
+  const formatChosenAnswerText = (ans: any): string => {
+    if (ans === null || ans === undefined) return '';
+    if (typeof ans === 'string') return ans;
+    if (Array.isArray(ans)) return ans.join(' → ');
+    if (typeof ans === 'object') {
+      return Object.values(ans).join(', ');
+    }
+    return String(ans);
+  };
+
   // 3. QUESTION ACTIVE (Interactive Controllers for all 10 formats)
   if (activeSession.status === 'question' && currentQuestion) {
+    const limitSec = activeSession.timeLimitSeconds || currentQuestion.timeLimit || 20;
+    const remainingPct = Math.min(100, Math.max(0, (timeLeft / limitSec) * 100));
+    const timerBarColor =
+      timeLeft <= 5
+        ? 'bg-rose-500'
+        : timeLeft <= 10
+        ? 'bg-amber-400'
+        : 'bg-emerald-400';
+
     return (
-      <div className="max-w-md mx-auto px-4 py-4 space-y-4 min-h-[82vh] flex flex-col justify-between">
-        {/* Top Info Bar with Synchronized Timer & Quick Room Switch */}
-        <div className="flex items-center justify-between text-xs sm:text-sm text-zinc-300 bg-zinc-900/65 px-3.5 py-2.5 rounded-2xl border border-zinc-800/90 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-bold text-zinc-100 truncate max-w-[115px]">{player.nickname}</span>
-            <span className="text-[11px] font-mono text-zinc-400 hidden xs:inline">
-              #{activeSession.pin}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span
-              className={`px-2.5 py-1 rounded-lg border font-mono font-bold tabular-nums flex items-center gap-1 ${
-                timeLeft <= 5
-                  ? 'bg-rose-950/60 border-rose-500/50 text-rose-300 animate-pulse'
-                  : 'bg-zinc-950 border-zinc-800 text-zinc-100'
-              }`}
-            >
-              <ClockCountdown size={14} weight="bold" />
-              <span>{timeLeft}s</span>
-            </span>
-            {player.streak > 1 && (
-              <span className="text-amber-400 flex items-center gap-1 font-mono font-bold">
-                <Flame size={14} weight="fill" /> {player.streak}x
-              </span>
-            )}
-            <span className="font-mono font-bold text-zinc-100 tabular-nums">{player.score} pts</span>
-            <button
-              type="button"
-              onClick={() => handleLeaveRoom(true)}
-              className="p-1.5 rounded-lg bg-zinc-950 hover:bg-rose-950/40 border border-zinc-800 hover:border-rose-500/40 text-zinc-400 hover:text-rose-300 transition-colors"
-              title="Sair da sala ou entrar em outro quiz"
-            >
-              <SignOut size={14} weight="bold" />
-            </button>
-          </div>
-        </div>
-
-        {/* Question Prompt */}
-        <div className="text-center space-y-2.5 py-1">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300 font-medium">
-            <span>
+      <div className="max-w-md mx-auto px-4 py-3 space-y-3 min-h-[calc(100dvh-3.5rem)] flex flex-col justify-between">
+        {/* Top Section: Thin Timer Progress Bar + Question Prompt */}
+        <div className="space-y-2.5">
+          {/* Thin progress bar with remaining seconds alongside */}
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-mono text-zinc-300 font-semibold tabular-nums shrink-0">
               {questionIndex + 1}/{activeSession.totalQuestions}
             </span>
-            {questionMeta && (
-              <>
-                <span>·</span>
-                {QuestionIcon && <QuestionIcon size={13} weight="bold" />}
-                <span>{questionMeta.shortLabel}</span>
-              </>
-            )}
+            <div className="flex-1 h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ease-linear ${timerBarColor}`}
+                style={{ width: `${remainingPct}%` }}
+              />
+            </div>
+            <span
+              className={`text-xs font-mono font-bold tabular-nums shrink-0 min-w-[2.25rem] text-right ${
+                timeLeft <= 5 ? 'text-rose-400' : timeLeft <= 10 ? 'text-amber-300' : 'text-zinc-100'
+              }`}
+            >
+              {timeLeft}s
+            </span>
           </div>
-          <h2 className="mobile-question text-zinc-100 px-1">
+
+          <h2 className="mobile-question text-zinc-100 text-center px-1">
             {currentQuestion.question}
           </h2>
         </div>
 
-        {/* Answer Controls: Interactive per format */}
+        {/* Answer Controls: Interactive per format (placed in lower half within thumb reach) */}
         {hasAnsweredCurrentQ ? (
-          <div className="p-8 rounded-3xl bg-zinc-900/60 border border-zinc-800/90 text-center space-y-3.5 my-auto shadow-lg shadow-black/20">
-            <AnswerSentIllustration className="w-24 h-24 mx-auto" />
-            <h3 className="text-xl font-extrabold text-zinc-100 font-display">Resposta Enviada!</h3>
-            <p className="text-sm text-zinc-300 max-w-xs mx-auto leading-relaxed">
-              Sua participação foi registrada. Acompanhe a revelação do resultado no telão.
-            </p>
+          <div className="p-6 rounded-2xl bg-zinc-900/70 border border-zinc-800 text-center space-y-3 my-auto">
+            {submitError ? (
+              <>
+                <div className="inline-flex items-center justify-center gap-2 text-rose-400 font-display font-extrabold text-base sm:text-lg">
+                  <WarningCircle size={22} weight="fill" />
+                  <span>Falha no envio</span>
+                </div>
+
+                {selectedAnswer !== null && selectedAnswer !== undefined && (
+                  <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-200 font-semibold text-sm sm:text-base break-words">
+                    {formatChosenAnswerText(selectedAnswer)}
+                  </div>
+                )}
+
+                <p className="text-xs text-rose-300">{submitError}</p>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSubmitAnswer(selectedAnswer, true)}
+                    className="flex-1 min-h-[48px] py-2.5 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 font-display font-extrabold text-sm transition-colors"
+                  >
+                    Reenviar agora
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasAnsweredCurrentQ(false);
+                      setSubmitError(null);
+                    }}
+                    className="min-h-[48px] py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-sm transition-colors"
+                  >
+                    Trocar opção
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="inline-flex items-center justify-center gap-2 text-emerald-400 font-display font-extrabold text-lg">
+                  {isSubmittingAnswer ? (
+                    <>
+                      <CircleNotch size={20} weight="bold" className="animate-spin" />
+                      <span>Enviando resposta...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={22} weight="fill" />
+                      <span>Resposta enviada ✓</span>
+                    </>
+                  )}
+                </div>
+
+                {selectedAnswer !== null && selectedAnswer !== undefined && (
+                  <div className="p-3.5 rounded-xl bg-emerald-950/35 border border-emerald-500/40 text-emerald-100 font-semibold text-sm sm:text-base break-words">
+                    {formatChosenAnswerText(selectedAnswer)}
+                  </div>
+                )}
+
+                <p className="text-xs text-zinc-300">
+                  Aguardando o encerramento da rodada...
+                </p>
+              </>
+            )}
           </div>
         ) : (
-          <div className="space-y-3.5 flex-1 flex flex-col justify-center">
+          <div className="space-y-2.5 mt-auto pt-1">
             {/* 1. VERDADEIRO OU FALSO */}
             {currentQuestion.type === 'boolean' && (
-              <div className="grid grid-cols-1 gap-3.5">
+              <div className="grid grid-cols-1 gap-2.5">
                 <button
+                  type="button"
                   onClick={() => handleSubmitAnswer('Verdadeiro')}
-                  className="py-5 px-5 rounded-2xl bg-zinc-900 hover:bg-zinc-850 active:scale-[0.98] border border-sky-500/35 hover:border-sky-500/65 text-zinc-100 mobile-option shadow-sm transition-all flex items-center justify-between"
+                  className="min-h-[56px] py-3.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-sky-500/40 hover:border-sky-400 text-zinc-100 mobile-option transition-colors flex items-center justify-between"
                 >
-                  <span className="w-10 h-10 rounded-xl bg-sky-500/15 border border-sky-500/35 font-mono text-base font-bold flex items-center justify-center text-sky-400">
+                  <span className="w-9 h-9 rounded-lg bg-sky-500/15 border border-sky-500/35 font-mono text-sm font-bold flex items-center justify-center text-sky-300">
                     V
                   </span>
                   <span>Verdadeiro</span>
-                  <div className="w-10" />
+                  <div className="w-9" />
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => handleSubmitAnswer('Falso')}
-                  className="py-5 px-5 rounded-2xl bg-zinc-900 hover:bg-zinc-850 active:scale-[0.98] border border-rose-500/35 hover:border-rose-500/65 text-zinc-100 mobile-option shadow-sm transition-all flex items-center justify-between"
+                  className="min-h-[56px] py-3.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-rose-500/40 hover:border-rose-400 text-zinc-100 mobile-option transition-colors flex items-center justify-between"
                 >
-                  <span className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/35 font-mono text-base font-bold flex items-center justify-center text-rose-400">
+                  <span className="w-9 h-9 rounded-lg bg-rose-500/15 border border-rose-500/35 font-mono text-sm font-bold flex items-center justify-center text-rose-300">
                     F
                   </span>
                   <span>Falso</span>
-                  <div className="w-10" />
+                  <div className="w-9" />
                 </button>
               </div>
             )}
@@ -651,19 +782,19 @@ export const StudentView: React.FC<StudentViewProps> = ({
               currentQuestion.type === 'image' ||
               currentQuestion.type === 'media' ||
               currentQuestion.type === 'poll') && (
-              <div className="space-y-3.5">
+              <div className="space-y-2.5">
                 {/* Adaptive Media / Image preview on phone */}
                 {currentQuestion.mediaUrl && (
-                  <div className="illustration-frame rounded-2xl overflow-hidden bg-zinc-950/90">
+                  <div className="rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800">
                     {currentQuestion.mediaType === 'image' || currentQuestion.type === 'image' ? (
                       <img
                         src={currentQuestion.mediaUrl}
                         alt="Imagem da questão"
-                        className="w-full max-h-52 sm:max-h-60 object-contain mx-auto p-1.5"
+                        className="w-full max-h-40 sm:max-h-48 object-contain mx-auto p-1"
                       />
                     ) : currentQuestion.mediaType === 'audio' ? (
-                      <div className="p-3.5 flex items-center gap-3 bg-zinc-900/70">
-                        <SpeakerHigh size={22} weight="duotone" className="text-amber-400 shrink-0" />
+                      <div className="p-3 flex items-center gap-3 bg-zinc-900">
+                        <SpeakerHigh size={20} weight="duotone" className="text-amber-400 shrink-0" />
                         <audio controls src={currentQuestion.mediaUrl} className="w-full h-9" />
                       </div>
                     ) : youtubeEmbedUrl ? (
@@ -680,24 +811,25 @@ export const StudentView: React.FC<StudentViewProps> = ({
                       <video
                         controls
                         src={currentQuestion.mediaUrl}
-                        className="w-full max-h-52 object-contain mx-auto"
+                        className="w-full max-h-40 object-contain mx-auto"
                       />
                     )}
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {currentQuestion.options?.map((opt, i) => {
                     const theme = MULTIPLE_CHOICE_THEMES[i % MULTIPLE_CHOICE_THEMES.length];
                     const IconComp = theme.icon;
                     return (
                       <button
+                        type="button"
                         key={i}
                         onClick={() => handleSubmitAnswer(opt)}
-                        className={`p-4 rounded-2xl bg-zinc-900 hover:bg-zinc-850 active:scale-[0.98] border border-zinc-800 ${theme.hoverBorderClass} text-zinc-100 mobile-option shadow-sm transition-all flex items-center gap-3.5 text-left`}
+                        className={`min-h-[56px] p-3.5 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 ${theme.hoverBorderClass} text-zinc-100 mobile-option transition-colors flex items-center gap-3 text-left`}
                       >
-                        <div className={`w-10 h-10 rounded-xl bg-zinc-950 border ${theme.borderClass} ${theme.textClass} flex items-center justify-center shrink-0`}>
-                          <IconComp size={16} weight="fill" />
+                        <div className={`w-9 h-9 rounded-lg bg-zinc-950 border ${theme.borderClass} ${theme.textClass} flex items-center justify-center shrink-0`}>
+                          <IconComp size={15} weight="fill" />
                         </div>
                         <span className="line-clamp-3 leading-snug">{opt}</span>
                       </button>
@@ -714,21 +846,21 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   e.preventDefault();
                   if (shortAnswerInput.trim()) handleSubmitAnswer(shortAnswerInput.trim());
                 }}
-                className="space-y-3.5"
+                className="space-y-2.5"
               >
                 <input
                   type="text"
                   value={shortAnswerInput}
                   onChange={(e) => setShortAnswerInput(e.target.value)}
                   placeholder={currentQuestion.placeholder || 'Digite sua resposta curta...'}
-                  className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-750 text-white text-base placeholder:text-zinc-500 focus:outline-none focus:border-amber-400/70 text-center font-semibold"
+                  className="w-full min-h-[52px] p-3.5 rounded-xl bg-zinc-900 border border-zinc-750 text-white text-base placeholder:text-zinc-400 focus:outline-none focus:border-amber-400 text-center font-semibold"
                   autoFocus
                   required
                 />
                 <button
                   type="submit"
                   disabled={!shortAnswerInput.trim()}
-                  className="w-full py-4 rounded-2xl bg-zinc-100 hover:bg-white disabled:opacity-40 text-zinc-950 font-display font-extrabold text-base shadow-sm transition-all active:scale-[0.98]"
+                  className="w-full min-h-[52px] py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-zinc-950 font-display font-extrabold text-base transition-colors"
                 >
                   Enviar Resposta
                 </button>
@@ -889,7 +1021,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   e.preventDefault();
                   if (wordCloudInput.trim()) handleSubmitAnswer(wordCloudInput.trim());
                 }}
-                className="space-y-3.5"
+                className="space-y-3"
               >
                 <input
                   type="text"
@@ -897,14 +1029,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   value={wordCloudInput}
                   onChange={(e) => setWordCloudInput(e.target.value)}
                   placeholder={currentQuestion.placeholder || 'Digite 1 ou 2 palavras...'}
-                  className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-750 text-white text-base placeholder:text-zinc-500 focus:outline-none focus:border-amber-400/70 text-center font-semibold"
+                  className="w-full min-h-[52px] p-3.5 rounded-xl bg-zinc-900 border border-zinc-750 text-white text-base placeholder:text-zinc-400 focus:outline-none focus:border-amber-400 text-center font-semibold"
                   autoFocus
                   required
                 />
                 <button
                   type="submit"
                   disabled={!wordCloudInput.trim()}
-                  className="w-full py-4 rounded-2xl bg-zinc-100 hover:bg-white disabled:opacity-40 text-zinc-950 font-display font-extrabold text-base shadow-sm transition-all active:scale-[0.98]"
+                  className="w-full min-h-[52px] py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-zinc-950 font-display font-extrabold text-base transition-colors"
                 >
                   Enviar para a Nuvem
                 </button>
@@ -918,7 +1050,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   e.preventDefault();
                   if (openEndedInput.trim()) handleSubmitAnswer(openEndedInput.trim());
                 }}
-                className="space-y-3.5"
+                className="space-y-3"
               >
                 <textarea
                   rows={4}
@@ -926,18 +1058,18 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   value={openEndedInput}
                   onChange={(e) => setOpenEndedInput(e.target.value)}
                   placeholder={currentQuestion.placeholder || 'Escreva sua reflexão ou justificativa...'}
-                  className="w-full p-4 rounded-2xl bg-zinc-900 border border-zinc-750 text-white text-base placeholder:text-zinc-500 focus:outline-none focus:border-amber-400/70 leading-relaxed font-sans"
+                  className="w-full p-3.5 rounded-xl bg-zinc-900 border border-zinc-750 text-white text-base placeholder:text-zinc-400 focus:outline-none focus:border-amber-400 leading-relaxed font-sans"
                   autoFocus
                   required
                 />
-                <div className="flex items-center justify-between text-xs text-zinc-400 font-mono">
+                <div className="flex items-center justify-between text-xs text-zinc-300 font-medium">
                   <span>Resposta discursiva</span>
-                  <span>{openEndedInput.length}/300</span>
+                  <span className="font-mono tabular-nums">{openEndedInput.length}/300</span>
                 </div>
                 <button
                   type="submit"
                   disabled={!openEndedInput.trim()}
-                  className="w-full py-4 rounded-2xl bg-zinc-100 hover:bg-white disabled:opacity-40 text-zinc-950 font-display font-extrabold text-base shadow-sm transition-all active:scale-[0.98]"
+                  className="w-full min-h-[52px] py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-zinc-950 font-display font-extrabold text-base transition-colors"
                 >
                   Enviar Reflexão
                 </button>
@@ -946,30 +1078,39 @@ export const StudentView: React.FC<StudentViewProps> = ({
           </div>
         )}
 
-        <div className="text-center text-xs text-zinc-400 font-mono">
-          Acompanhe o cronômetro no telão da sala
+        <div className="pt-2 text-center">
+          <button
+            type="button"
+            onClick={() => setShowLeaveConfirm(true)}
+            className="min-h-[44px] px-4 py-2 text-xs text-zinc-300 hover:text-white inline-flex items-center gap-1.5 transition-colors"
+          >
+            <SignOut size={14} weight="bold" />
+            <span>Sair da sala</span>
+          </button>
         </div>
+
+        {renderLeaveConfirmModal()}
       </div>
     );
   }
 
   // 4. ROUND RESULT VIEW
-  if (activeSession.status === 'result' && currentQuestion) {
+  if (activeSession.status === 'result' && revealedQuestion) {
     const isOpinionType = Boolean(questionMeta?.isOpinion);
-    const isCorrect = checkAnswerCorrectness(currentQuestion, selectedAnswer);
+    const isCorrect = checkAnswerCorrectness(revealedQuestion, selectedAnswer);
 
     return (
       <div className="max-w-sm sm:max-w-md mx-auto px-4 py-8 space-y-5 text-center">
         {/* Top bar with PIN and quick exit */}
-        <div className="flex items-center justify-between text-xs font-mono text-zinc-400">
+        <div className="flex items-center justify-between text-xs font-mono text-zinc-300">
           <span>PIN {activeSession.pin}</span>
           <button
             type="button"
-            onClick={() => handleLeaveRoom(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-zinc-100 transition-colors"
+            onClick={() => setShowLeaveConfirm(true)}
+            className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-zinc-100 font-sans font-semibold transition-colors"
           >
-            <ArrowsLeftRight size={13} weight="bold" />
-            Trocar Sala
+            <ArrowsLeftRight size={14} weight="bold" />
+            <span>Trocar Sala</span>
           </button>
         </div>
 
@@ -999,13 +1140,13 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 : 'Quase lá! Continue Focado'}
             </h2>
 
-            {currentQuestion.correctAnswer && !isOpinionType && (
+            {revealedQuestion.correctAnswer && !isOpinionType && (
               <p className="text-sm text-zinc-300 leading-relaxed">
-                Gabarito: <strong className="text-zinc-100">"{currentQuestion.correctAnswer}"</strong>
+                Gabarito: <strong className="text-zinc-100">"{revealedQuestion.correctAnswer}"</strong>
               </p>
             )}
 
-            {!currentQuestion.correctAnswer && !isOpinionType && (
+            {!revealedQuestion.correctAnswer && !isOpinionType && (
               <p className="text-sm text-zinc-300 leading-relaxed">
                 Confira o gabarito completo projetado no telão.
               </p>
@@ -1022,7 +1163,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
         {/* Current Score Card */}
         <div className="p-4 sm:p-5 rounded-2xl bg-zinc-900/60 border border-zinc-800/90 flex items-center justify-between">
           <div className="text-left">
-            <span className="text-xs text-zinc-400 block font-mono uppercase">Pontuação Total</span>
+            <span className="text-xs text-zinc-300 block font-medium">Pontuação Total</span>
             <span className="text-2xl font-bold text-zinc-100 font-mono tabular-nums">
               {player.score} pts
             </span>
@@ -1036,9 +1177,11 @@ export const StudentView: React.FC<StudentViewProps> = ({
           )}
         </div>
 
-        <p className="text-xs text-zinc-400 font-mono">
+        <p className="text-xs text-zinc-300">
           Aguardando a próxima etapa no telão...
         </p>
+
+        {renderLeaveConfirmModal()}
       </div>
     );
   }
@@ -1052,15 +1195,17 @@ export const StudentView: React.FC<StudentViewProps> = ({
     return (
       <div className="max-w-sm sm:max-w-md mx-auto px-4 py-8 space-y-5 text-center">
         {/* Top bar with PIN and quick exit */}
-        <div className="flex items-center justify-between text-xs font-mono text-zinc-400">
+        <div className="flex items-center justify-between text-xs font-mono text-zinc-300">
           <span>PIN {activeSession.pin}</span>
           <button
             type="button"
-            onClick={() => handleLeaveRoom(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-zinc-100 transition-colors"
+            onClick={() =>
+              activeSession.status === 'podium' ? handleLeaveRoom(true) : setShowLeaveConfirm(true)
+            }
+            className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-zinc-100 font-sans font-semibold transition-colors"
           >
-            <ArrowsLeftRight size={13} weight="bold" />
-            Trocar Sala
+            <ArrowsLeftRight size={14} weight="bold" />
+            <span>Trocar Sala</span>
           </button>
         </div>
 
@@ -1077,7 +1222,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
           </div>
 
           <div className="space-y-1">
-            <span className="text-xs font-mono uppercase tracking-widest text-zinc-400 block">
+            <span className="text-xs font-medium text-zinc-300 block">
               {activeSession.status === 'podium' ? 'Resultado Final' : 'Classificação Parcial'}
             </span>
             <h3 className="text-xl font-extrabold text-zinc-100 font-display">
@@ -1087,7 +1232,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 ? `${myRank}ª Posição na Sala`
                 : player.nickname}
             </h3>
-            <span className="text-sm text-zinc-300 font-mono tabular-nums block">
+            <span className="text-sm text-zinc-200 font-mono tabular-nums block">
               {mySnapshotScore} pontos acumulados
             </span>
           </div>
@@ -1098,25 +1243,27 @@ export const StudentView: React.FC<StudentViewProps> = ({
             <button
               type="button"
               onClick={() => handleLeaveRoom(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-sky-400 hover:bg-sky-300 text-zinc-950 font-display font-extrabold text-sm transition-all shadow-md shadow-sky-500/15"
+              className="w-full sm:w-auto min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-sky-400 hover:bg-sky-300 text-zinc-950 font-display font-extrabold text-sm transition-all shadow-md shadow-sky-500/15"
             >
               <ArrowsLeftRight size={16} weight="bold" />
-              Entrar em Outro Quiz
+              <span>Entrar em Outro Quiz</span>
             </button>
             <button
               type="button"
               onClick={() => handleLeaveRoom(false)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-200 text-sm font-semibold transition-colors"
+              className="w-full sm:w-auto min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-200 text-sm font-semibold transition-colors"
             >
               <SignOut size={16} weight="bold" />
-              Sair da Sala
+              <span>Sair da Sala</span>
             </button>
           </div>
         ) : (
-          <p className="text-xs text-zinc-400 font-mono">
+          <p className="text-xs text-zinc-300">
             Se o professor reiniciar ou avançar, sua tela atualizará sozinha.
           </p>
         )}
+
+        {renderLeaveConfirmModal()}
       </div>
     );
   }

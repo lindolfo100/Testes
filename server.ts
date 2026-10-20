@@ -16,7 +16,7 @@ const app = express();
 const PORT = 3000;
 let activeServerPort = PORT;
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '256kb' }));
 
 function getLocalLanIp(): string | null {
   const nets = os.networkInterfaces();
@@ -38,7 +38,22 @@ app.get('/api/network-info', (_req, res) => {
 });
 
 app.post('/api/gemini/generate-quiz', async (req, res) => {
-  const result = await generateOrParseQuiz(req.body || {});
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip =
+    typeof forwarded === 'string'
+      ? forwarded.split(',')[0].trim()
+      : req.socket.remoteAddress || 'unknown';
+
+  const customApiKey =
+    (typeof req.headers['x-gemini-api-key'] === 'string' ? req.headers['x-gemini-api-key'] : '') ||
+    req.body?.apiKey;
+
+  const result = await generateOrParseQuiz(req.body || {}, {
+    authHeader: req.headers.authorization,
+    clientId: typeof req.headers['x-client-id'] === 'string' ? req.headers['x-client-id'] : undefined,
+    apiKey: customApiKey ? customApiKey.trim() : undefined,
+    ip,
+  });
   if (result.error) {
     return res.status(result.status).json({ error: result.error });
   }

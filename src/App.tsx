@@ -1,6 +1,7 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { AuthProvider } from './context/AuthContext';
-import { Navbar, AppView } from './components/Navbar';
+import { Navbar, AppView, StudentHeaderHud } from './components/Navbar';
+import { PWAInstallBanner } from './components/PWAInstallButton';
 import { WelcomeView } from './views/WelcomeView';
 import { SAMPLE_QUIZZES } from './data/sampleQuizzes';
 import { Quiz } from './types/quiz';
@@ -10,6 +11,7 @@ import {
   closeLiveSession,
   restartLiveSession,
 } from './services/quizService';
+import { auth, resolveCurrentUid } from './lib/firebase';
 import { STORAGE_KEYS } from './constants/storage';
 import { OfflineIndicator } from './components/OfflineIndicator';
 
@@ -31,13 +33,14 @@ export default function App() {
   });
 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [activeSessionPin, setActiveSessionPin] = useState<string | null>(() => {
+  const [activeSessionPin, setActiveSessionPin] = useState<string | null>(null);
+
+  const [studentPrefilledPin, setStudentPrefilledPin] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     const urlPin = params.get('pin')?.replace(/\D/g, '');
     return urlPin && urlPin.length === 6 ? urlPin : null;
   });
-
-  const [studentPrefilledPin, setStudentPrefilledPin] = useState<string | null>(null);
+  const [studentHud, setStudentHud] = useState<StudentHeaderHud | null>(null);
   const [quizzes, setQuizzes] = useState<Quiz[]>(SAMPLE_QUIZZES);
   const [isLaunchingDemo, setIsLaunchingDemo] = useState(false);
 
@@ -53,7 +56,7 @@ export default function App() {
     }
 
     // Only load teacher quizzes when not entering directly as a student
-    getTeacherQuizzes('guest').then((data) => {
+    getTeacherQuizzes(resolveCurrentUid()).then((data) => {
       if (data && data.length > 0) {
         setQuizzes(data);
       }
@@ -82,7 +85,11 @@ export default function App() {
     setIsLaunchingDemo(true);
     try {
       const demoQuiz = quizzes[0] || SAMPLE_QUIZZES[0];
-      const session = await createLiveSession(demoQuiz, 'prof_demo', 'Professor(a)');
+      const session = await createLiveSession(
+        demoQuiz,
+        resolveCurrentUid(),
+        auth.currentUser?.displayName || 'Professor(a)'
+      );
       handleStartSession(session.id, session.pin);
     } catch (err) {
       console.error('Failed to launch demo session:', err);
@@ -92,7 +99,10 @@ export default function App() {
     }
   };
 
-  const handleCloseActiveSession = async () => {
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
+  const confirmAndCloseActiveSession = async () => {
+    setShowCloseConfirm(false);
     const idToClose = activeSessionId;
     setActiveSessionId(null);
     setActiveSessionPin(null);
@@ -104,6 +114,10 @@ export default function App() {
     if (idToClose) {
       await closeLiveSession(idToClose);
     }
+  };
+
+  const handleCloseActiveSession = () => {
+    setShowCloseConfirm(true);
   };
 
   const handleRestartActiveSession = async () => {
@@ -130,13 +144,15 @@ export default function App() {
           onNavigate={(v) => setCurrentView(v)}
           activeSessionPin={activeSessionId ? activeSessionPin : null}
           onCloseActiveSession={activeSessionId ? handleCloseActiveSession : undefined}
-          onRestartActiveSession={activeSessionId ? handleRestartActiveSession : undefined}
+          studentHud={studentHud}
         />
+
+        {(currentView === 'welcome' || currentView === 'dashboard') && <PWAInstallBanner />}
 
         <main className="flex-1">
           <Suspense
             fallback={
-              <div className="flex items-center justify-center py-24 text-xs font-mono text-zinc-500">
+              <div className="flex items-center justify-center py-24 text-xs text-zinc-400">
                 Carregando...
               </div>
             }
@@ -182,12 +198,48 @@ export default function App() {
                 initialPin={studentPrefilledPin || activeSessionPin}
                 quizzes={quizzes}
                 onBackToDashboard={() => setCurrentView('welcome')}
+                onHudChange={setStudentHud}
               />
             )}
           </Suspense>
         </main>
 
-        <footer className="border-t border-zinc-900/80 py-3.5 px-6 text-center text-[11px] text-zinc-500 font-mono">
+        {showCloseConfirm && (
+          <div
+            onClick={() => setShowCloseConfirm(false)}
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl text-left"
+            >
+              <h3 className="text-base font-bold text-zinc-100 font-display">
+                Encerrar a sala ao vivo?
+              </h3>
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                A apresentação (PIN {activeSessionPin}) será encerrada para todos os alunos conectados.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCloseConfirm(false)}
+                  className="min-h-[44px] px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-xs font-semibold transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmAndCloseActiveSession}
+                  className="min-h-[44px] px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-zinc-950 text-xs font-bold transition-colors"
+                >
+                  Sim, Encerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <footer className="border-t border-zinc-900/80 py-3.5 px-6 text-center text-xs text-zinc-400">
           Valendo! · Perguntas e Respostas em Tempo Real
         </footer>
 
