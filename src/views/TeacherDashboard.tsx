@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { auth, resolveCurrentUid } from '../lib/firebase';
 import { Quiz, QuestionType, QuizReport } from '../types/quiz';
 import {
   getTeacherQuizzes,
@@ -132,16 +133,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   }, [effectiveUid]);
 
   const handleCreateOrUpdate = async (quizData: Omit<Quiz, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const currentUid = effectiveUid;
+    const currentUid = auth.currentUser?.uid || effectiveUid || resolveCurrentUid();
     const isExistingUserQuiz =
       Boolean(quizToEdit?.id) &&
-      quizToEdit?.ownerId === currentUid &&
+      (quizToEdit?.ownerId === currentUid || quizToEdit?.ownerId === effectiveUid) &&
       quizToEdit?.ownerId !== 'system';
 
     if (isExistingUserQuiz && quizToEdit?.id) {
       await updateQuiz(quizToEdit.id, {
         ...quizData,
-        ownerId: currentUid,
+        ownerId: quizToEdit.ownerId,
       });
     } else {
       await createQuiz({

@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function isValidDeviceId(id) {
-      return id is string && id.size() == 28 && id.matches('^dev_[a-f0-9]{24}$');
+      return id is string && id.size() >= 4 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -23,9 +23,9 @@ service cloud.firestore {
     }
 
     // Matches either the authenticated Firebase user (Google or Anonymous Auth)
-    // or a valid 24-hex per-device fallback ID when Anonymous Auth is not enabled in Console.
+    // or a valid device identifier fallback when working in unauthenticated/guest classroom mode.
     function isOwner(ownerId) {
-      return (isSignedIn() && ownerId == request.auth.uid)
+      return (isSignedIn() && (ownerId == request.auth.uid || isValidDeviceId(ownerId)))
         || (!isSignedIn() && isValidDeviceId(ownerId));
     }
 
@@ -53,11 +53,11 @@ service cloud.firestore {
       allow list: if resource.data.isPublic == true || isOwner(resource.data.ownerId);
       allow create: if isValidId(quizId)
         && isOwner(incoming().ownerId)
-        && incoming().title is string && incoming().title.size() <= 150;
+        && incoming().title is string && incoming().title.size() <= 300;
       allow update: if isValidId(quizId)
         && isOwner(existing().ownerId)
         && incoming().ownerId == existing().ownerId
-        && incoming().title is string && incoming().title.size() <= 150;
+        && incoming().title is string && incoming().title.size() <= 300;
       allow delete: if isValidId(quizId)
         && isOwner(existing().ownerId);
     }
@@ -128,15 +128,13 @@ service cloud.firestore {
       }
     }
 
-    // Consolidated historical reports for authenticated teachers only (LGPD privacy)
+    // Consolidated historical reports for teachers (works both with Google login and device ID)
     match /reports/{reportId} {
-      allow get, list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow get, list: if isOwner(resource.data.teacherId);
       allow create: if isValidId(reportId)
-        && isSignedIn()
-        && incoming().teacherId == request.auth.uid;
+        && isOwner(incoming().teacherId);
       allow update, delete: if isValidId(reportId)
-        && isSignedIn()
-        && existing().teacherId == request.auth.uid;
+        && isOwner(existing().teacherId);
     }
   }
 }
